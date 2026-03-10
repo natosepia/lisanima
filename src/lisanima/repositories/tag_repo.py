@@ -2,9 +2,12 @@
 
 tags テーブルおよび message_tags テーブルへの操作を提供する。
 """
+import logging
 import unicodedata
 
 from psycopg import AsyncConnection
+
+logger = logging.getLogger(__name__)
 
 
 def normalizeTagName(name: str) -> str:
@@ -65,6 +68,7 @@ async def findOrCreateTags(
                 )
                 tags.append(await cur.fetchone())
 
+    logger.debug("タグ取得/作成: %s", [t["name"] for t in tags])
     return tags
 
 

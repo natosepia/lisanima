@@ -2,7 +2,11 @@
 
 messages テーブルへのCRUD操作を提供する。
 """
+import logging
+
 from psycopg import AsyncConnection, sql
+
+logger = logging.getLogger(__name__)
 
 
 def encodeEmotion(joy: int = 0, anger: int = 0, sorrow: int = 0, fun: int = 0) -> int:
@@ -82,7 +86,9 @@ async def insertMessage(
             """,
             (session_id, category, speaker, content, emotion, target),
         )
-        return await cur.fetchone()
+        msg = await cur.fetchone()
+        logger.debug("メッセージ保存: id=%s, session_id=%s", msg["id"], session_id)
+        return msg
 
 
 async def searchMessages(
@@ -119,8 +125,9 @@ async def searchMessages(
     params: list = []
 
     if query:
-        conditions.append("m.content ILIKE %s")
-        params.append(f"%{query}%")
+        # pg_trgm の % 演算子でGINインデックスを活用
+        conditions.append("m.content %% %s")
+        params.append(query)
 
     if speaker:
         conditions.append("m.speaker = %s")
@@ -158,9 +165,11 @@ async def searchMessages(
     # タグのAND検索: HAVING COUNT で全タグ一致を保証
     group_by = ""
     having = ""
+    having_params: list = []
     if tags:
         group_by = "GROUP BY m.id, s.date"
-        having = f"HAVING COUNT(DISTINCT t.name) = {len(tags)}"
+        having = "HAVING COUNT(DISTINCT t.name) = %s"
+        having_params = [len(tags)]
 
     # ORDER BY: query指定時はpg_trgm類似度、それ以外は新しい順
     if query:
@@ -171,6 +180,10 @@ async def searchMessages(
         order_params = []
 
     async with conn.cursor() as cur:
+        # 日本語の短いクエリ向けにsimilarity閾値を下げる
+        if query:
+            await cur.execute("SET pg_trgm.similarity_threshold = 0.1")
+
         # 件数取得
         count_sql = f"""
             SELECT COUNT(*) FROM (
@@ -183,7 +196,7 @@ async def searchMessages(
                 {having}
             ) sub
         """
-        await cur.execute(count_sql, params)
+        await cur.execute(count_sql, params + having_params)
         total = (await cur.fetchone())["count"]
 
         # データ取得
@@ -199,31 +212,59 @@ async def searchMessages(
             {order_by}
             LIMIT %s OFFSET %s
         """
-        await cur.execute(data_sql, params + order_params + [limit, offset])
+        await cur.execute(
+            data_sql,
+            params + having_params + order_params + [limit, offset],
+        )
         rows = await cur.fetchall()
 
-    # 感情値をデコードして返す
+    # メッセージIDリストをまとめてタグを一括取得（N+1防止）
     messages = []
+    message_ids = [row["id"] for row in rows]
+    tags_by_msg: dict[int, list[str]] = {}
+
+    if message_ids:
+        tags_by_msg = await _getMessageTagsBatch(conn, message_ids)
+
+    # 感情値をデコードして返す
     for row in rows:
         msg = dict(row)
         msg["emotion"] = decodeEmotion(msg["emotion"])
-        # タグ情報を付与
-        msg["tags"] = await _getMessageTags(conn, msg["id"])
+        msg["tags"] = tags_by_msg.get(msg["id"], [])
         messages.append(msg)
 
+    logger.debug("メッセージ検索: total=%d, returned=%d", total, len(messages))
     return {"total": total, "messages": messages}
 
 
-async def _getMessageTags(conn: AsyncConnection, message_id: int) -> list[str]:
-    """メッセージに紐づくタグ名のリストを取得する。"""
+async def _getMessageTagsBatch(
+    conn: AsyncConnection,
+    message_ids: list[int],
+) -> dict[int, list[str]]:
+    """複数メッセージのタグを一括取得する。
+
+    Args:
+        conn: DB接続
+        message_ids: メッセージIDリスト
+
+    Returns:
+        {message_id: [tag_name, ...]} の辞書
+    """
+    placeholders = ", ".join(["%s"] * len(message_ids))
     async with conn.cursor() as cur:
         await cur.execute(
-            """
-            SELECT t.name FROM tags t
-            JOIN message_tags mt ON t.id = mt.tag_id
-            WHERE mt.message_id = %s
+            f"""
+            SELECT mt.message_id, t.name
+            FROM message_tags mt
+            JOIN tags t ON mt.tag_id = t.id
+            WHERE mt.message_id IN ({placeholders})
             ORDER BY t.name
             """,
-            (message_id,),
+            message_ids,
         )
-        return [row["name"] for row in await cur.fetchall()]
+        rows = await cur.fetchall()
+
+    tags_by_msg: dict[int, list[str]] = {}
+    for row in rows:
+        tags_by_msg.setdefault(row["message_id"], []).append(row["name"])
+    return tags_by_msg

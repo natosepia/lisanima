@@ -40,7 +40,7 @@ def get_dsn() -> str:
     dbname = os.getenv("DB_NAME", "lisanima_db")
     user = quote_plus(os.getenv("DB_USER", ""))
     password = quote_plus(os.getenv("DB_PASSWORD", ""))
-    return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+    return f"postgresql://{user}:{password}@{host}:{port}/{dbname}?connect_timeout=10"
 
 
 class AsyncDatabasePool:
@@ -64,7 +64,11 @@ class AsyncDatabasePool:
             min_size=2,
             max_size=5,
             open=False,
-            kwargs={"row_factory": dict_row},
+            kwargs={
+                "row_factory": dict_row,
+                "autocommit": False,
+                "options": "-c statement_timeout=30000",
+            },
         )
         await self._pool.open()
         logger.info("非同期DB接続プール開始")
