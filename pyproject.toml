@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "リサの魂を永続化するMCPサーバー"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.26.0",
     "psycopg[binary,pool]>=3.2",
     "python-dotenv>=1.0",
+    "bcrypt>=4.0",
 ]
 
 [project.scripts]

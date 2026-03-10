@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>lisanima - PIN認証</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 360px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            font-size: 1.2rem;
+            text-align: center;
+            margin-bottom: 0.5rem;
+            color: #a0c4ff;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 1.5rem;
+        }
+        label {
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 0.4rem;
+            color: #ccc;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 0.7rem;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background: #0f3460;
+            color: #fff;
+            font-size: 1.1rem;
+            letter-spacing: 0.3em;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #a0c4ff;
+        }
+        .buttons {
+            display: flex;
+            gap: 0.8rem;
+        }
+        button {
+            flex: 1;
+            padding: 0.7rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.85; }
+        .btn-approve {
+            background: #4361ee;
+            color: #fff;
+        }
+        .btn-deny {
+            background: #444;
+            color: #ccc;
+        }
+        .error {
+            color: #ff6b6b;
+            font-size: 0.85rem;
+            text-align: center;
+            margin-bottom: 1rem;
+            min-height: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>lisanima</h1>
+        <p class="subtitle">MCPサーバーへのアクセスを許可しますか？</p>
+        <div class="error">{{error}}</div>
+        <form method="POST" action="/auth/pin">
+            <input type="hidden" name="session_id" value="{{session_id}}">
+            <label for="pin">PIN</label>
+            <input type="password" id="pin" name="pin" required autofocus
+                   autocomplete="off" inputmode="numeric">
+            <div class="buttons">
+                <button type="submit" name="action" value="approve" class="btn-approve">許可</button>
+                <button type="submit" name="action" value="deny" class="btn-deny">拒否</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
