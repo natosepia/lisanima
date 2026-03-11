@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-- **DB**: PostgreSQL（既存インスタンスに `lisanima` データベースを作成）
+- **DB**: PostgreSQL（既存インスタンスに `lisanima_db` データベースを作成）
 - **全文検索**: pg_trgm拡張 + GINインデックス
 - **文字コード**: UTF-8
 
