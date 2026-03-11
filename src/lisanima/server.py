@@ -82,7 +82,7 @@ def _createMcp() -> FastMCP:
         from lisanima.auth.provider import LisanimaOAuthProvider
 
         auth_settings = AuthSettings(
-            issuer_url="https://quriowork.com/lisanima",
+            issuer_url="https://quriowork.com",
             resource_server_url="https://quriowork.com/lisanima/mcp",
             client_registration_options=ClientRegistrationOptions(
                 enabled=True,

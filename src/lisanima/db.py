@@ -6,6 +6,7 @@ crypto_trade_bot の async_database.py をベースに、lisanima用に調整。
 """
 import os
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -80,23 +81,25 @@ class AsyncDatabasePool:
             self._pool = None
             logger.info("非同期DB接続プール終了")
 
-    def get_connection(self):
+    @asynccontextmanager
+    async def get_connection(self):
         """接続プールから接続を取得する（非同期コンテキストマネージャ）。
+
+        プール未初期化の場合は自動で初期化する（lazy init）。
+        OAuth認証フローなど、MCPセッション確立前のリクエストに対応するため。
 
         Usage:
             async with db_pool.get_connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT ...")
 
-        Returns:
-            AsyncConnection のコンテキストマネージャ
-
-        Raises:
-            RuntimeError: プールが未初期化の場合
+        Yields:
+            AsyncConnection
         """
         if not self._pool:
-            raise RuntimeError("DB接続プールが未初期化です。open()を先に呼び出してください。")
-        return self._pool.connection()
+            await self.open()
+        async with self._pool.connection() as conn:
+            yield conn
 
 
 # シングルトンインスタンス
