@@ -6,33 +6,34 @@
 flowchart LR
     %% ===== クライアント層 =====
     subgraph clients ["LLMクライアント"]
-        cc["Claude Code\n(VSCode)"]
+        cc["Claude Code<br/>(VSCode)"]
         da["Desktop App"]
     end
 
     %% ===== 接続経路 =====
     cc -- "stdio" --> tools
     da -- "HTTPS" --> nginx
-    nginx["nginx\n(SSL終端)"] -- "HTTP\n(OAuth 2.1)" --> tools
+    nginx["nginx<br/>(SSL終端)"] -- "HTTP<br/>(OAuth 2.1)" --> tools
 
     %% ===== lisanima サーバー =====
     subgraph server ["lisanima MCPサーバー (Python)"]
-        tools["MCP Tools Layer\nremember / forget / recall\nrulebook / topic_manage / organize"]
+        tools["MCP Tools Layer<br/>remember / forget / recall<br/>rulebook / topic_manage / organize"]
         repo["Repository Layer"]
-        db["Database Layer\n(psycopg3 ConnectionPool)"]
+        db["Database Layer<br/>(psycopg3 ConnectionPool)"]
         tools --> repo --> db
     end
 
     %% ===== lisanima CLI (Phase 2) =====
-    cli["lisanima CLI\n(Phase 2)\nHooks・cron"] -- "直接利用" --> repo
+    cli["lisanima CLI<br/>(Phase 2)<br/>Hooks・cron"] -- "直接利用" --> repo
 
     %% ===== PostgreSQL =====
     subgraph pg ["PostgreSQL — lisanima_db"]
         direction TB
-        pg_core["コア\nsessions / messages / tags"]
-        pg_topic["トピック\ntopics / roles"]
-        pg_rule["ルールブック\nrulebooks"]
-        pg_oauth["OAuth\nclient / token"]
+        pg_core["コア<br/>sessions / messages / tags"]
+        pg_topic["トピック<br/>topics / roles"]
+        pg_rule["ルールブック<br/>rulebooks"]
+        pg_oauth["OAuth<br/>client / token"]
+        pg_core ~~~ pg_topic ~~~ pg_rule ~~~ pg_oauth
     end
 
     db --> pg
