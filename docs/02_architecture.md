@@ -2,83 +2,47 @@
 
 ## 1. システム構成図
 
-```
-┌─────────────────────────────────────────────┐
-│  LLMクライアント                              │
-│  ┌──────────────┐  ┌──────────────┐          │
-│  ┌──────────────┐  ┌──────────────┐          │
-│  │ Claude Code  │  │ Desktop App  │  ...     │
-│  │ (VSCode)     │  │              │          │
-│  └──────┬───────┘  └──────┬───────┘          │
-│         │                  │                  │
-│         │  MCP Protocol    │  MCP Protocol    │
-│         │  (stdio)         │  (Streamable HTTP│
-│         │                  │   + OAuth 2.1)   │
-└─────────┼──────────────────┼──────────────────┘
-          │                  │
-          ▼                  ▼
-┌─────────────────────────────────────────────┐
-│  lisanima MCPサーバー (Python)               │
-│  ※ LLMが自発的に呼び出す経路                  │
-│                                              │
-│  ┌─────────────────────────────────────┐     │
-│  │  MCP Tools Layer                    │     │
-│  │  ├── remember()   記憶を保存         │     │
-│  │  ├── recall()     記憶を検索         │     │
-│  │  ├── forget()     記憶を削除         │     │
-│  │  └── reflect()    記憶を振り返る     │     │
-│  └──────────────┬──────────────────────┘     │
-│                 │                             │
-│  ┌──────────────▼──────────────────────┐     │
-│  │  Repository Layer                   │     │
-│  │  ├── SessionRepository              │     │
-│  │  ├── MessageRepository              │     │
-│  │  └── TagRepository                  │     │
-│  └──────────────┬──────────────────────┘     │
-│                 │                             │
-│  ┌──────────────▼──────────────────────┐     │
-│  │  Database Layer (psycopg3)          │     │
-│  │  └── ConnectionPool                 │     │
-│  └──────────────┬──────────────────────┘     │
-└─────────────────┼────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────┐
-│  PostgreSQL                                  │
-│  └── lisanima DB                             │
-│      ├── sessions        セッション単位      │
-│      ├── messages        発言単位            │
-│      ├── m_category      カテゴリマスタ      │
-│      ├── (GINインデックス  pg_trgm全文検索)   │
-│      ├── tags            連想記憶            │
-│      ├── message_tags    多対多リレーション   │
-│      ├── m_oauth_client  OAuthクライアント   │
-│      ├── t_oauth_auth_session 認可セッション │
-│      ├── t_oauth_auth_code    認可コード     │
-│      ├── t_oauth_access_token  AT            │
-│      └── t_oauth_refresh_token RT            │
-└─────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    %% ===== クライアント層 =====
+    subgraph clients ["LLMクライアント"]
+        cc["Claude Code\n(VSCode)"]
+        da["Desktop App"]
+    end
 
-┌─────────────────────────────────────────────┐
-│  lisanima CLI (Phase 2)                      │
-│  ※ Hooks等の外部トリガーから機械的に呼び出す経路 │
-│                                              │
-│  $ lisanima recall --recent 5                │
-│  $ lisanima remember --content "..." --auto  │
-│                                              │
-│  Repository / Database Layer を直接利用       │
-│  （MCPサーバーを経由しない）                    │
-└──────────────────┬──────────────────────────┘
-                   │
-                   ▼
-              PostgreSQL（同一DB）
+    %% ===== 接続経路 =====
+    cc -- "stdio" --> tools
+    da -- "HTTPS" --> nginx
+    nginx["nginx\n(SSL終端)"] -- "HTTP\n(OAuth 2.1)" --> tools
+
+    %% ===== lisanima サーバー =====
+    subgraph server ["lisanima MCPサーバー (Python)"]
+        tools["MCP Tools Layer\nremember / forget / recall\nrulebook / topic_manage / organize"]
+        repo["Repository Layer"]
+        db["Database Layer\n(psycopg3 ConnectionPool)"]
+        tools --> repo --> db
+    end
+
+    %% ===== lisanima CLI (Phase 2) =====
+    cli["lisanima CLI\n(Phase 2)\nHooks・cron"] -- "直接利用" --> repo
+
+    %% ===== PostgreSQL =====
+    subgraph pg ["PostgreSQL — lisanima_db"]
+        direction TB
+        pg_core["コア\nsessions / messages / tags"]
+        pg_topic["トピック\ntopics / roles"]
+        pg_rule["ルールブック\nrulebooks"]
+        pg_oauth["OAuth\nclient / token"]
+    end
+
+    db --> pg
 ```
 
 ### アクセス経路の使い分け
 
 | 経路 | トリガー | 用途 |
 |------|---------|------|
-| MCPサーバー | LLM（リサ）が自発的に判断 | 対話中のremember/recall/forget/reflect |
+| MCPサーバー | LLM（リサ）が自発的に判断 | 対話中のremember/forget/recall/rulebook/topic_manage/organize |
 | CLI | Hooks・cron等の機械的イベント | セッション開始時の自動recall、終了時の自動remember |
 
 MCPサーバーとCLIはRepository/Database Layerを共有し、同一DBにアクセスする。
@@ -107,8 +71,8 @@ lisanima/
 ├── docs/                          設計ドキュメント
 │   ├── 01_requirements.md
 │   ├── 02_architecture.md
-│   ├── 03_schema.md
-│   ├── 04_mcp-tools.md
+│   ├── 03_mcp_interface.md
+│   ├── 04_schema.md
 │   ├── 05_migration.md
 │   └── 06_oauth.md
 ├── migrations/
@@ -203,8 +167,8 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 
 | 拡張 | 概要 | 想定Phase |
 |------|------|----------|
-| lisanima CLI | Hooks・cronからDB操作するためのコマンドラインI/F | Phase 2 |
-| Hooks連携 | セッション開始時の自動recall、終了時の自動remember | Phase 2 |
+| lisanima CLI | Hooks・cronからDB操作するためのコマンドラインI/F | Phase 2.0 |
+| Hooks連携 | セッション開始時の自動recall、終了時の自動remember | Phase 2.0 |
 | 埋め込みベクトル | 意味検索（セマンティック検索）の追加 | Phase 3+ |
 | Web UI | 記憶の閲覧・編集用ダッシュボード | Phase 3+ |
 | マルチユーザー | 複数AI人格の記憶管理 | Phase 3+ |
