@@ -41,8 +41,11 @@ erDiagram
         text speaker
         text target
         text content
-        int emotion
-        int emotion_total
+        smallint joy
+        smallint anger
+        smallint sorrow
+        smallint fun
+        smallint emotion_total
         text source
         bool is_deleted
         text deleted_reason
@@ -78,8 +81,11 @@ erDiagram
         text name
         text status
         bool important
-        int emotion
-        int emotion_total
+        smallint joy
+        smallint anger
+        smallint sorrow
+        smallint fun
+        smallint emotion_total
         timestamptz created_at
         timestamptz closed_at
     }
@@ -218,8 +224,11 @@ erDiagram
 | speaker | TEXT | NOT NULL | 発言者（CHECK制約なし。後述） |
 | target | TEXT | NULLABLE | 発言先（broadcastや独白はNULL） |
 | content | TEXT | NOT NULL | 発言内容 |
-| emotion | INTEGER | NOT NULL, DEFAULT 0 | 感情ベクトル（符号付き32bit。後述） |
-| emotion_total | INTEGER | GENERATED ALWAYS AS STORED | 感情値合計（検索用。後述） |
+| joy | SMALLINT | NOT NULL, DEFAULT 0 | 喜び（0-255） |
+| anger | SMALLINT | NOT NULL, DEFAULT 0 | 怒り（0-255） |
+| sorrow | SMALLINT | NOT NULL, DEFAULT 0 | 哀しみ（0-255） |
+| fun | SMALLINT | NOT NULL, DEFAULT 0 | 楽しさ（0-255） |
+| emotion_total | SMALLINT | GENERATED ALWAYS AS (joy + anger + sorrow + fun) STORED | 感情値合計（検索用） |
 | source | TEXT | NULLABLE | MCPクライアント識別子（clientInfo.name を自動記録。例: "claude-code", "claude-desktop"） |
 | is_deleted | BOOLEAN | NOT NULL, DEFAULT FALSE | 論理削除フラグ |
 | deleted_reason | TEXT | NULLABLE | 削除理由（forget時に記録） |
@@ -228,20 +237,16 @@ erDiagram
 **旧仕様からの変更:**
 - `category` 列を削除（m_category廃止に伴い、分類はタグで吸収）
 - `idx_t_messages_category` インデックスを削除
+- `emotion` INTEGER列を `joy`, `anger`, `sorrow`, `fun` の4カラムに分離（emotion 4カラム独立化）
+- `emotion_total` をビットシフト式から単純加算の生成列に変更
 
 **speaker にCHECK制約を付けない理由:**
 - Phase 3でマルチユーザー（複数AI人格）対応を予定しており、発言者が現在の6名に限定されない
 - speakerはユーザー側の拡張で増える性質
 
-**emotion 列の符号付き32bit整数に関する注意:**
-- PostgreSQLのINTEGERは符号付き32bit（-2,147,483,648 〜 2,147,483,647）
-- joy（最上位8bit）が128以上の場合、整数値としては負の値になる（例: 0xFF0000FF → -16776961）
-- ビット演算でデコードすれば正しく復元できるため、動作上は問題ない
-- **emotion列に対する直接的な大小比較（`emotion > 0` 等）は使用禁止**。感情値のフィルタリング・ソートには必ず `emotion_total` Generated Columnを使用する
-
 **emotion_total（Generated Column）:**
-- `((emotion >> 24) & 255) + ((emotion >> 16) & 255) + ((emotion >> 8) & 255) + (emotion & 255)` で自動計算
-- recallのmin_emotionフィルタ、reflectの並び替えに使用
+- `joy + anger + sorrow + fun` で自動計算
+- recallのemotion_filterフィルタ、reflectの並び替えに使用
 - Generated Columnなので手動更新不要、インデックスも作成可能
 
 ### 3.3 t_tags（タグ）
@@ -286,13 +291,16 @@ t_messages と t_tags の多対多リレーション。
 | name | TEXT | NOT NULL | トピック名（UNIQUEにしない。同名でも別インスタンス） |
 | status | TEXT | NOT NULL, DEFAULT 'open', CHECK (status IN ('open', 'closed')) | 状態 |
 | important | BOOLEAN | NOT NULL, DEFAULT FALSE | 重要フラグ |
-| emotion | INTEGER | NOT NULL, DEFAULT 0 | リサの主観的感情値（4バイトベクトル） |
-| emotion_total | INTEGER | GENERATED ALWAYS AS STORED | 感情値合計（検索用） |
+| joy | SMALLINT | NOT NULL, DEFAULT 0 | 喜び（0-255） |
+| anger | SMALLINT | NOT NULL, DEFAULT 0 | 怒り（0-255） |
+| sorrow | SMALLINT | NOT NULL, DEFAULT 0 | 哀しみ（0-255） |
+| fun | SMALLINT | NOT NULL, DEFAULT 0 | 楽しさ（0-255） |
+| emotion_total | SMALLINT | GENERATED ALWAYS AS (joy + anger + sorrow + fun) STORED | 感情値合計（検索用） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 | closed_at | TIMESTAMPTZ | NULLABLE | クローズ日時 |
 
 **emotion_total（Generated Column）:**
-- `((emotion >> 24) & 255) + ((emotion >> 16) & 255) + ((emotion >> 8) & 255) + (emotion & 255)` で自動計算
+- `joy + anger + sorrow + fun` で自動計算
 
 **設計判断:**
 - nameをUNIQUEにしない理由: 同じ議題名でも時期が異なれば別インスタンスとして管理する
@@ -331,6 +339,11 @@ t_sessions と t_topics の N:N 中間テーブル。
 | study | 学習・研究 |
 | casual | 雑談・日常会話 |
 | coaching | 指導・コーチング |
+| writing | 文章作成・編集 |
+| analysis | 分析・調査レポート |
+| planning | 計画立案 |
+| creative | 創作 |
+| facilitation | 議論整理・ファシリテーション |
 
 ### 3.8 t_topic_roles（トピック×役割）
 
@@ -469,27 +482,31 @@ access_tokenの再取得に使用。30日で失効。
 
 ## 5. 感情ベクトル仕様
 
-4バイト整数に喜怒哀楽の4チャンネルを格納する。t_messages.emotion および t_topics.emotion で共通仕様。
+喜怒哀楽の4感情を独立カラムで管理する。t_messages および t_topics で共通仕様。
 
-```
-ビット配置: [喜: 8bit][怒: 8bit][哀: 8bit][楽: 8bit]
+### カラム構成
 
-エンコード: emotion = (joy << 24) | (anger << 16) | (sorrow << 8) | fun
-デコード:   joy    = (emotion >> 24) & 0xFF
-            anger  = (emotion >> 16) & 0xFF
-            sorrow = (emotion >> 8)  & 0xFF
-            fun    = emotion & 0xFF
-```
+| カラム | 型 | 範囲 | 説明 |
+|--------|-----|------|------|
+| joy | SMALLINT | 0-255 | 喜び |
+| anger | SMALLINT | 0-255 | 怒り |
+| sorrow | SMALLINT | 0-255 | 哀しみ |
+| fun | SMALLINT | 0-255 | 楽しさ |
+| emotion_total | SMALLINT | 0-1020 | 生成列（joy + anger + sorrow + fun） |
 
-**代表的な感情値:**
+- 各カラムは `NOT NULL DEFAULT 0` で定義
+- `emotion_total` は `GENERATED ALWAYS AS (joy + anger + sorrow + fun) STORED` で自動計算される生成列
+- 各感情値は独立カラムのため、直接的な大小比較・レンジ検索が可能
 
-| 感情値 (HEX) | 喜 | 怒 | 哀 | 楽 | 意味 |
-|--------------|-----|-----|-----|-----|------|
-| 0xFF0000FF | 255 | 0 | 0 | 255 | 成功体験（嬉しい＆楽しい） |
-| 0x00800000 | 0 | 128 | 0 | 0 | ちょっとイラッとした |
-| 0x0000C000 | 0 | 0 | 192 | 0 | かなり苦しんだ（デバッグ地獄） |
-| 0x00FF0000 | 0 | 255 | 0 | 0 | ブチギレ（本番障害） |
-| 0x00000000 | 0 | 0 | 0 | 0 | 無感情（事実の記録） |
+### 代表的な感情値
+
+| joy | anger | sorrow | fun | 意味 |
+|-----|-------|--------|-----|------|
+| 255 | 0 | 0 | 255 | 成功体験（嬉しい＆楽しい） |
+| 0 | 128 | 0 | 0 | ちょっとイラッとした |
+| 0 | 0 | 192 | 0 | かなり苦しんだ（デバッグ地獄） |
+| 0 | 255 | 0 | 0 | ブチギレ（本番障害） |
+| 0 | 0 | 0 | 0 | 無感情（事実の記録） |
 
 ## 6. インデックス設計
 
@@ -556,9 +573,12 @@ CREATE TABLE t_messages (
     speaker        TEXT NOT NULL,
     target         TEXT,
     content        TEXT NOT NULL,
-    emotion        INTEGER NOT NULL DEFAULT 0,
-    emotion_total  INTEGER GENERATED ALWAYS AS (
-        ((emotion >> 24) & 255) + ((emotion >> 16) & 255) + ((emotion >> 8) & 255) + (emotion & 255)
+    joy            SMALLINT NOT NULL DEFAULT 0,
+    anger          SMALLINT NOT NULL DEFAULT 0,
+    sorrow         SMALLINT NOT NULL DEFAULT 0,
+    fun            SMALLINT NOT NULL DEFAULT 0,
+    emotion_total  SMALLINT GENERATED ALWAYS AS (
+        joy + anger + sorrow + fun
     ) STORED,
     source         TEXT,
     is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,
@@ -587,9 +607,12 @@ CREATE TABLE t_topics (
     name           TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     important      BOOLEAN NOT NULL DEFAULT FALSE,
-    emotion        INTEGER NOT NULL DEFAULT 0,
-    emotion_total  INTEGER GENERATED ALWAYS AS (
-        ((emotion >> 24) & 255) + ((emotion >> 16) & 255) + ((emotion >> 8) & 255) + (emotion & 255)
+    joy            SMALLINT NOT NULL DEFAULT 0,
+    anger          SMALLINT NOT NULL DEFAULT 0,
+    sorrow         SMALLINT NOT NULL DEFAULT 0,
+    fun            SMALLINT NOT NULL DEFAULT 0,
+    emotion_total  SMALLINT GENERATED ALWAYS AS (
+        joy + anger + sorrow + fun
     ) STORED,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at      TIMESTAMPTZ
@@ -611,12 +634,17 @@ CREATE TABLE m_role (
 );
 
 INSERT INTO m_role (name, description) VALUES
-    ('sparring',  '議論の壁打ち相手'),
-    ('support',   'サポート・補助'),
-    ('review',    'レビュー・品質確認'),
-    ('study',     '学習・研究'),
-    ('casual',    '雑談・日常会話'),
-    ('coaching',  '指導・コーチング');
+    ('sparring',      '議論の壁打ち相手'),
+    ('support',       'サポート・補助'),
+    ('review',        'レビュー・品質確認'),
+    ('study',         '学習・研究'),
+    ('casual',        '雑談・日常会話'),
+    ('coaching',      '指導・コーチング'),
+    ('writing',       '文章作成・編集'),
+    ('analysis',      '分析・調査レポート'),
+    ('planning',      '計画立案'),
+    ('creative',      '創作'),
+    ('facilitation',  '議論整理・ファシリテーション');
 
 -- トピック×役割（N:N中間テーブル）
 CREATE TABLE t_topic_roles (
