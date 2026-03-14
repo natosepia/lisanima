@@ -394,7 +394,7 @@ t_topics と m_role の N:N 中間テーブル。
 ### 3.11 OAuth 2.1テーブル
 
 OAuth 2.1認証で使用するテーブル群。既存のlisanimaテーブルとはFK関連なし（独立）。
-詳細は [06_oauth.md](06_oauth.md) を参照。
+詳細は [07_oauth.md](07_oauth.md) を参照。
 
 #### 3.11.1 m_oauth_client（OAuthクライアント）
 

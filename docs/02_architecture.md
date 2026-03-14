@@ -124,7 +124,7 @@ LLMクライアント  --stdin-->  lisanima MCPサーバー
 
 ### 5.2 Streamable HTTP（リモート接続）
 - Desktop App等のリモートクライアント → nginx → lisanima MCPサーバー
-- OAuth 2.1認証（PIN方式）実装済み。詳細: [06_oauth.md](06_oauth.md)
+- OAuth 2.1認証（PIN方式）実装済み。詳細: [07_oauth.md](07_oauth.md)
 - systemdサービス `lisanima.service` で `--http` モード稼働中
 
 ```
@@ -159,7 +159,7 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 - **stdioモード**: ローカルサブプロセス通信のため認証不要（UNIXプロセス間通信のセキュリティに依存）
 - **HTTPモード**: OAuth 2.1認証を実装。PIN方式による認可フロー
 
-セキュリティの詳細は [06_oauth.md](06_oauth.md) を参照。
+セキュリティの詳細は [07_oauth.md](07_oauth.md) を参照。
 
 ## 7. ログ戦略
 
