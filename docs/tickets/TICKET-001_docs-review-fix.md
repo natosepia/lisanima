@@ -41,7 +41,7 @@
 | B-6 | 04_mcp-tools.md | reflectのレスポンスにspeaker追加 | [x] |
 | B-7 | 04_mcp-tools.md | recallのdate_from/date_toがsessions.dateに対して適用されることを明記 | [x] |
 | B-8 | 01_requirements.md | 非機能要件にバックアップ/リカバリ追記 | [x] |
-| B-9 | 05_migration.md | パース仕様を実際のMarkdownフォーマットに合わせて精緻化（概要レベル + 実装時に確定） | [x] |
+| B-9 | 90_markdown_migration.md | パース仕様を実際のMarkdownフォーマットに合わせて精緻化（概要レベル + 実装時に確定） | [x] |
 
 ---
 

@@ -108,7 +108,8 @@ lisanima/
 - トランザクション制御
 - `get_connection()` は `@asynccontextmanager` + lazy init パターン。OAuth認証フローなどMCPセッション確立前のリクエストにも対応
 
-→ マイグレーション詳細: [05_migration.md](05_migration.md)
+→ Markdownデータ移行: [90_markdown_migration.md](90_markdown_migration.md)
+→ スキーママイグレーション戦略: [05_schema_migration.md](05_schema_migration.md)
 
 ## 5. 通信方式
 
