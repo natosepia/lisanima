@@ -384,6 +384,8 @@ location /auth/pin { proxy_pass http://127.0.0.1:8765/auth/pin; ... }
 
 ## 9. セキュリティ考慮事項
 
+> インフラ層の対策（rate limiting、fail2ban、HTTPヘッダ硬化等）は [06_security.md](06_security.md) Part B を参照。
+
 | リスク | 対策 |
 |--------|------|
 | トークン窃取 | SSL必須（nginx終端）。access_tokenは短命（1時間） |
