@@ -124,7 +124,7 @@ erDiagram
     }
 ```
 
-> **v_active_rulebooks (VIEW)**: t_rulebooks から `MAX(version)` かつ `is_retired = FALSE` の最新かつ有効なルールのみを返すビュー。`UNIQUE(key, version)` 制約により key 単位でバージョン管理される。
+> **v_active_rulebooks (VIEW)**: key単位で最新バージョンを取得し、そのレコードが有効（`is_retired = FALSE`）な場合のみ返すビュー。最新バージョンがretiredなら結果に含まれない。詳細はセクション3.10参照。
 
 ### OAuth 2.1
 
@@ -384,18 +384,12 @@ t_topics と m_role の N:N 中間テーブル。
 
 最新かつ有効なルールのみを返すビュー。
 
-```sql
-CREATE VIEW v_active_rulebooks AS
-SELECT r.*
-FROM t_rulebooks r
-INNER JOIN (
-    SELECT key, MAX(version) AS max_version
-    FROM t_rulebooks
-    WHERE is_retired = FALSE
-    GROUP BY key
-) latest ON r.key = latest.key AND r.version = latest.max_version
-WHERE r.is_retired = FALSE;
-```
+**仕様:**
+- key単位で最新バージョン（MAX(version)）を取得し、そのレコードが `is_retired = FALSE` の場合のみ返す
+- 最新バージョンがretiredなら、そのkeyは結果に含まれない（旧バージョンが復活することはない）
+- retireされたkeyを再度有効にするには、新バージョンをINSERTする（rulebookコマンドのset操作）
+
+**DDL**: [server.py](../src/lisanima/server.py) または セクション7のDDLを参照
 
 ### 3.11 OAuth 2.1テーブル
 
@@ -673,7 +667,6 @@ FROM t_rulebooks r
 INNER JOIN (
     SELECT key, MAX(version) AS max_version
     FROM t_rulebooks
-    WHERE is_retired = FALSE
     GROUP BY key
 ) latest ON r.key = latest.key AND r.version = latest.max_version
 WHERE r.is_retired = FALSE;
