@@ -160,13 +160,13 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 - **stdioモード**: ローカルサブプロセス通信のため認証不要（UNIXプロセス間通信のセキュリティに依存）
 - **HTTPモード**: OAuth 2.1認証を実装。PIN方式による認可フロー
 
-セキュリティの詳細は [07_oauth.md](07_oauth.md) を参照。
+セキュリティの詳細は [06_security.md](06_security.md)、認証プロトコルは [07_oauth.md](07_oauth.md) を参照。
 
 ## 7. ログ戦略
 
 - **出力先**: stderr（MCPプロトコルがstdin/stdoutを占有するため）
 - **本番運用**: systemd journalで永続化
-- 詳細なログレベル方針は別途策定予定
+→ 詳細: [08_logging.md](08_logging.md)
 
 ## 8. トランザクション設計
 
@@ -177,7 +177,18 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 
 → 詳細: [09_transaction.md](09_transaction.md)
 
-## 9. 将来の拡張ポイント
+## 9. 実装詳細図
+
+- **クラス図**: [10_class_diagram.md](10_class_diagram.md) — Pythonコードのクラス構造・レイヤー間の依存関係
+- **シーケンス図**: [11_sequence_diagram.md](11_sequence_diagram.md) — remember / recall / OAuth認証の処理フロー
+
+## 10. テスト・デプロイ・運用
+
+- **テスト戦略**: [12_testing.md](12_testing.md)
+- **デプロイ手順**: [31_deployment.md](31_deployment.md) — ゼロからlisanimaを動かすまで
+- **オペレーション**: [32_operation.md](32_operation.md) — 定型/非定型の運用手順書
+
+## 11. 将来の拡張ポイント
 
 | 拡張 | 概要 | 想定Phase |
 |------|------|----------|
