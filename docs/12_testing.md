@@ -148,6 +148,18 @@ async def db_conn():
 
 fixture間の依存は `sample_message` → `sample_session` → `db_conn` のように連鎖させ、DRYを保つ。
 
+### 4.4 emotion テストデータ
+
+`encodeEmotion` / `decodeEmotion` の境界値テスト等で使用する代表的なemotion値を定数化し、テストケース間のマジックナンバー散乱を防ぐ。
+
+```python
+# tests/conftest.py または tests/unit/test_emotion.py
+EMOTION_ZERO = {"joy": 0, "anger": 0, "sorrow": 0, "fun": 0}
+EMOTION_MAX = {"joy": 255, "anger": 255, "sorrow": 255, "fun": 255}
+EMOTION_JOY_ONLY = {"joy": 128, "anger": 0, "sorrow": 0, "fun": 0}
+EMOTION_MIXED = {"joy": 80, "anger": 30, "sorrow": 0, "fun": 120}
+```
+
 ## 5. モック戦略
 
 ### 5.1 モックしないもの（実物を使用）

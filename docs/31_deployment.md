@@ -62,7 +62,64 @@ host lisanima_db lisa 127.0.0.1/32 scram-sha-256
 
 詳細: [06_security.md](06_security.md) セクション9.2
 
-## 3. アプリケーション セットアップ
+## 3. ファイアウォール設定
+
+### 3.1 ufw によるポート制御
+
+デフォルトDROPポリシーで必要なポートのみ許可する。
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow from <管理者IP> to any port 22
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+PostgreSQL（5432）はローカルホスト接続のみのためルール追加不要。
+
+詳細: [06_security.md](06_security.md) セクション9
+
+### 3.2 fail2ban 設定
+
+PIN認証失敗を検知してIPをバンするfail2ban設定を配置する。
+
+1. filterファイルを作成する
+   ```ini
+   # /etc/fail2ban/filter.d/lisanima-pin.conf
+   [Definition]
+   failregex = PIN authentication failed.*client=<HOST>
+   ignoreregex =
+   ```
+
+2. jailファイルを作成する
+   ```ini
+   # /etc/fail2ban/jail.d/lisanima.conf
+   [lisanima-pin]
+   enabled  = true
+   filter   = lisanima-pin
+   backend  = systemd
+   journalmatch = _SYSTEMD_UNIT=lisanima.service
+   maxretry = 5
+   findtime = 300
+   bantime  = 86400
+   action   = iptables-multiport[name=lisanima, port="443", protocol=tcp]
+   ```
+
+3. fail2banを再起動する
+   ```bash
+   sudo systemctl restart fail2ban
+   ```
+
+4. jail が有効になっていることを確認する
+   ```bash
+   sudo fail2ban-client status lisanima-pin
+   ```
+
+詳細: [06_security.md](06_security.md) セクション10
+
+## 4. アプリケーション セットアップ
 
 ### 3.1 リポジトリクローン
 
@@ -106,7 +163,7 @@ uv run lisanima
 
 MCPプロトコルの応答（JSON-RPC）が返ることを確認する。`Ctrl+C` で終了。
 
-## 4. systemd サービス設定
+## 5. systemd サービス設定
 
 ### 4.1 ユニットファイルの作成
 
@@ -150,7 +207,7 @@ sudo systemctl status lisanima.service
 
 `active (running)` であることを確認する。
 
-## 5. nginx 設定
+## 6. nginx 設定
 
 ### 5.1 SSL証明書の取得
 
@@ -305,7 +362,33 @@ sudo systemctl reload nginx
 - 3/26 auth specの制約により、OAuthエンドポイント（`/authorize`, `/token`, `/register`）はルートドメインに配置が必要（[07_oauth.md](07_oauth.md) セクション8参照）
 - `add_header` はlocationブロック内で1つでも指定すると、serverブロックの `add_header` が継承されなくなる。PIN画面のlocationでは全ヘッダを再指定すること
 
-## 6. Claude Code 側の設定
+## 7. バックアップ・cron 初期設定
+
+### 7.1 バックアップディレクトリの作成
+
+```bash
+mkdir -p ~/backup
+```
+
+### 7.2 crontab 登録
+
+```bash
+crontab -e
+```
+
+以下を追記する:
+
+```
+# 毎日AM3:00にlisanima_dbバックアップ取得
+0 3 * * * pg_dump -h localhost -U lisa lisanima_db > ~/backup/lisanima_db_$(date +\%Y\%m\%d).sql
+
+# 毎週日曜AM4:00に30日超のバックアップを削除
+0 4 * * 0 find ~/backup -name "lisanima_db_*.sql" -mtime +30 -delete
+```
+
+運用時のバックアップ確認・リストア手順は [32_operation.md](32_operation.md) を参照。
+
+## 8. Claude Code 側の設定
 
 ユーザーレベル（プロジェクト横断）でMCPサーバーを登録する。
 
@@ -315,26 +398,28 @@ claude mcp add --scope user lisanima -- uv run --directory /home/<user>/project/
 
 stdioモード（ローカルサブプロセス通信）で接続される。認証は不要。
 
-## 7. Desktop App 側の設定
+## 9. Desktop App 側の設定
 
 1. Claude Desktop App を開く
 2. 設定 > コネクタ > 「カスタムコネクタを追加」
 3. MCPサーバーURLに `https://<your-domain>/lisanima/mcp` を入力
 4. OAuth認証フロー（ブラウザでPIN入力）を完了して接続
 
-## 8. 動作確認チェックリスト
+## 10. 動作確認チェックリスト
 
 | # | 確認項目 | 確認コマンド / 方法 | 期待結果 |
 |---|---------|-------------------|---------|
 | 1 | PostgreSQL稼働 | `sudo systemctl status postgresql` | active (running) |
 | 2 | lisanima_db接続 | `psql -h localhost -U lisa -d lisanima_db -c '\dt'` | テーブル一覧が表示される |
 | 3 | pg_trgm有効 | `psql -d lisanima_db -c "SELECT * FROM pg_extension WHERE extname='pg_trgm'"` | 1行返却 |
-| 4 | lisanima.service稼働 | `sudo systemctl status lisanima.service` | active (running) |
-| 5 | ポート8765リッスン | `ss -tlnp \| grep 8765` | 127.0.0.1:8765 が表示される |
-| 6 | nginx設定テスト | `sudo nginx -t` | test is successful |
-| 7 | HTTPS接続 | `curl -I https://<your-domain>/lisanima/mcp` | 401 Unauthorized（OAuth未認証のため） |
-| 8 | ASメタデータ | `curl https://<your-domain>/.well-known/oauth-authorization-server` | JSON応答（issuer, authorize等のURL） |
-| 9 | SSL証明書 | `sudo certbot certificates` | 有効期限が表示される |
-| 10 | Claude Code MCP | Claude Code で `recall` を実行 | 結果が返る |
-| 11 | Desktop App MCP | Desktop App でカスタムコネクタ接続 | PIN認証後にMCP接続成功 |
-| 12 | journalログ | `journalctl -u lisanima.service --since "5 min ago"` | 起動ログが表示される |
+| 4 | ファイアウォール | `sudo ufw status` | Status: active、22/80/443のみ許可 |
+| 5 | fail2ban | `sudo fail2ban-client status lisanima-pin` | jail が active |
+| 6 | lisanima.service稼働 | `sudo systemctl status lisanima.service` | active (running) |
+| 7 | ポート8765リッスン | `ss -tlnp \| grep 8765` | 127.0.0.1:8765 が表示される |
+| 8 | nginx設定テスト | `sudo nginx -t` | test is successful |
+| 9 | HTTPS接続 | `curl -I https://<your-domain>/lisanima/mcp` | 401 Unauthorized（OAuth未認証のため） |
+| 10 | ASメタデータ | `curl https://<your-domain>/.well-known/oauth-authorization-server` | JSON応答（issuer, authorize等のURL） |
+| 11 | SSL証明書 | `sudo certbot certificates` | 有効期限が表示される |
+| 12 | Claude Code MCP | Claude Code で `recall` を実行 | 結果が返る |
+| 13 | Desktop App MCP | Desktop App でカスタムコネクタ接続 | PIN認証後にMCP接続成功 |
+| 14 | journalログ | `journalctl -u lisanima.service --since "5 min ago"` | 起動ログが表示される |

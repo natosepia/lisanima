@@ -6,7 +6,7 @@
 
 ### 1.1 pg_dump バックアップ確認
 
-バックアップはcronで自動実行される前提。手動実行・確認手順:
+バックアップはcronで自動実行される前提（初期設定は [31_deployment.md](31_deployment.md) セクション7参照）。手動実行・確認手順:
 
 ```bash
 # バックアップの手動実行
@@ -308,15 +308,7 @@ pg_dump -h localhost -U lisa lisanima_db > ~/backup/lisanima_db_$(date +%Y%m%d).
 | ローテーション | 30日超のファイルを手動削除、またはcronで自動削除 |
 | 外部バックアップ | 必要に応じてオブジェクトストレージ等に転送（現時点では未実施） |
 
-ローテーションの自動化例（crontab）:
-
-```
-# 毎日AM3:00にバックアップ取得
-0 3 * * * pg_dump -h localhost -U lisa lisanima_db > ~/backup/lisanima_db_$(date +\%Y\%m\%d).sql
-
-# 毎週日曜AM4:00に30日超のバックアップを削除
-0 4 * * 0 find ~/backup -name "lisanima_db_*.sql" -mtime +30 -delete
-```
+crontabの初期設定は [31_deployment.md](31_deployment.md) セクション7を参照。
 
 ## 4. 監視項目一覧
 
