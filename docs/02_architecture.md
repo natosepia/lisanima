@@ -171,8 +171,11 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 ## 8. トランザクション設計
 
 - psycopg3の `async with conn.transaction()` を利用
+- MCPコマンド1回 = トランザクション1つ（原子性の単位）
+- 分離レベル: READ COMMITTED（PostgreSQLデフォルト）
 - 単一PostgreSQLインスタンスのため分散トランザクション不要
-- 詳細はスキーマ設計確定後に策定（[04_schema.md](04_schema.md) 参照）
+
+→ 詳細: [09_transaction.md](09_transaction.md)
 
 ## 9. 将来の拡張ポイント
 
