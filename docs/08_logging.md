@@ -43,11 +43,40 @@ logging.basicConfig(
 | レイヤー | モジュール | ログ内容 |
 |---------|-----------|---------|
 | サーバー | server.py | 起動/終了、起動モード、OAuth有効化 |
-| ツール | tools/remember.py, tools/recall.py | コマンド実行完了(DEBUG)、DB接続エラー(ERROR)、予期しない例外(ERROR) |
+| ツール | tools/remember.py, tools/recall.py | コマンド実行完了(INFO)、DB接続エラー(ERROR)、予期しない例外(ERROR) |
 | リポジトリ | repositories/*.py | CRUD操作の詳細(DEBUG)、期限切れトークン掃除(INFO) |
 | DB | db.py | プール開始/終了(INFO) |
 | 認証 | auth/provider.py | クライアント登録、認可セッション作成、トークン交換/リフレッシュ/無効化(INFO) |
-| 認証 | auth/pin.py | PIN認証ロックアウト(WARNING)、PIN認証成功(INFO) |
+| 認証 | auth/pin.py | PIN認証失敗(WARNING, クライアントIP付き)、PIN認証ロックアウト(WARNING)、PIN認証成功(INFO) |
+
+**PIN認証失敗のログフォーマット（fail2ban連携）:**
+
+fail2banの `failregex` が `client=<HOST>` パターンでIPを抽出する前提（[06_security.md セクション10.3](06_security.md#103-アプリケーション側の対応) 参照）。
+アプリケーション側は `X-Forwarded-For` ヘッダからクライアントIPを取得し、以下の形式で出力する。
+
+```
+2026-03-14 10:30:05,789 [lisanima.auth.pin] WARNING: PIN authentication failed: client=203.0.113.5, session_id=abc123
+2026-03-14 10:30:35,012 [lisanima.auth.pin] WARNING: PIN認証ロックアウト発動: client=203.0.113.5, attempts=5
+2026-03-14 10:31:00,345 [lisanima.auth.pin] INFO: PIN認証成功: client=203.0.113.5, session_id=abc123
+```
+
+- 失敗ログの `PIN authentication failed` は英語固定（fail2banのfailregexと一致させるため）
+- `client=<IP>` はログメッセージの末尾ではなく、パースしやすい `key=value` 形式で埋め込む
+
+**MCPコマンド実行ログのINFOレベル方針:**
+
+セキュリティ監査の観点から「いつ誰が何のコマンドを叩いたか」を本番環境で追跡可能にするため、コマンド実行完了ログをDEBUGからINFOに引き上げる。
+ただし、記憶内容（`content`）はログに出力しない（セクション7 マスキングルール参照）。
+
+INFOレベルで出力する情報:
+- コマンド名（`remember` / `recall`）
+- パラメータのキー名（値は出力しない）
+- 結果の識別子（`message_id` 等の数値ID）
+
+```
+2026-03-14 10:30:02,789 [lisanima.tools.remember] INFO: remember完了: message_id=42, keys=[content,speaker,emotion]
+2026-03-14 10:30:03,012 [lisanima.tools.recall] INFO: recall完了: hits=3, keys=[keyword,speaker,limit]
+```
 
 ## 4. ログフォーマット
 
@@ -149,7 +178,9 @@ remember/recall のツール層ではcontent本文をログに出力していな
 
 | 項目 | 優先度 | 概要 |
 |------|--------|------|
-| リクエストID付与 | 中 | MCPリクエスト単位でtrace_idを付与し、一連のログを追跡可能にする |
+| リクエストID付与 | 中 | MCPリクエスト単位でtrace_idを付与し、一連のログを追跡可能にする。[06_security.md セクション11（異常検知）](06_security.md#11-ログ異常検知)の実装前提となる |
 | ログレベルの動的変更 | 低 | 環境変数 `LOG_LEVEL` でランタイム切替。再起動なしで調査モードに移行 |
 | 構造化ログ（JSON） | 低 | ログ集約基盤導入時に `python-json-logger` 等で移行 |
 | パフォーマンスログ | 低 | DB操作の実行時間計測。スロークエリの検出 |
+
+> **リクエストIDと異常検知の関係**: 06_security.md セクション11の異常検知（4xx/5xxスパイク、未知client_idからの大量リクエスト等）を実装する際、リクエストID（trace_id）が各ログ行に付与されていることが前提となる。リクエストIDにより、単一リクエストの認証→コマンド実行→DB操作の一連のログを横断的に追跡でき、異常パターンの特定精度が向上する。

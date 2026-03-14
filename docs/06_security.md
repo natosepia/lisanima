@@ -155,7 +155,7 @@ MCPコマンドのパラメータはInterface Layer（`tools/`）で検証する
 - 構造化ログ（JSON形式）の検討
 - OAuthトークンの期限切れレコード定期削除（クリーンアップジョブ）
 
-詳細なログ設計は 08_logging.md にて策定予定。
+詳細なログ設計は [08_logging.md](08_logging.md) を参照。
 
 ---
 
