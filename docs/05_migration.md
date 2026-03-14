@@ -43,8 +43,8 @@
 ## 別トピック（セッション区切り後）
 ```
 
-- `# 会話ログ: YYYY-MM-DD` → sessions.date
-- `**発言者名**: 内容` → messages.speaker, messages.content
+- `# 会話ログ: YYYY-MM-DD` → t_sessions.date
+- `**発言者名**: 内容` → t_messages.speaker, t_messages.content
 - `---` → セッション区切り（同日内のsession_seqをインクリメント）
 - `## 見出し` → トピック名として、直後の発言群のcontextに含める（見出し自体は独立メッセージにしない）
 - 複数行にわたる発言（次の `**発言者名**:` が出現するまで）は1つのcontentとして結合
@@ -77,8 +77,8 @@
 ```
 1. ~/claude_communication_log/ のファイル一覧を取得
 2. ファイル名から日付・カテゴリを抽出
-3. 日付ごとに sessions レコードを作成
-4. Markdownをパースして messages レコードを生成
+3. 日付ごとに t_sessions レコードを作成
+4. Markdownをパースして t_messages レコードを生成
 5. バルクINSERT（トランザクション単位: 1ファイル）
 6. 移行結果レポートを出力
 ```
@@ -118,8 +118,8 @@ Migration Report:
 -- 1. sessionsの日付に対応するファイルが存在するか
 -- 2. messagesの件数がMarkdownの発言数と一致するか
 -- 3. 孤立したmessages（session_idが無効）がないか
-SELECT m.id FROM messages m
-LEFT JOIN sessions s ON m.session_id = s.id
+SELECT m.id FROM t_messages m
+LEFT JOIN t_sessions s ON m.session_id = s.id
 WHERE s.id IS NULL;
 ```
 
@@ -129,7 +129,7 @@ WHERE s.id IS NULL;
 
 ```sql
 -- 全データ削除（移行データのみ。手動追加分がない前提）
-TRUNCATE message_tags, messages, sessions, tags RESTART IDENTITY CASCADE;
+TRUNCATE t_message_tags, t_messages, t_sessions, t_tags RESTART IDENTITY CASCADE;
 ```
 
 ## 8. 移行後の運用切り替え

@@ -1,38 +1,37 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: バグ報告
 title: ''
-labels: ''
+labels: 'bug'
 assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**バグの内容**
+何が起きたかを簡潔に記述してください。
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**再現手順**
+1. ...
+2. ...
+3. ...
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**期待される動作**
+本来どうなるべきかを記述してください。
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**エラーログ**
+関連するエラーメッセージやスタックトレースがあれば貼り付けてください。
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+```
+（ここにログを貼り付け）
+```
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+**環境情報**
+- 接続元: [例: Claude Code / Desktop App / Gemini CLI]
+- Python: [例: 3.12.3]
+- OS: [例: Ubuntu 24.04]
 
-**Additional context**
-Add any other context about the problem here.
+**スクリーンショット**
+必要に応じて添付してください。
+
+**補足**
+その他の情報があれば記述してください。
