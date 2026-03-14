@@ -121,20 +121,20 @@ PIN認証失敗を検知してIPをバンするfail2ban設定を配置する。
 
 ## 4. アプリケーション セットアップ
 
-### 3.1 リポジトリクローン
+### 4.1 リポジトリクローン
 
 ```bash
 git clone <リポジトリURL> /home/<user>/project/lisanima
 ```
 
-### 3.2 依存関係インストール
+### 4.2 依存関係インストール
 
 ```bash
 cd /home/<user>/project/lisanima
 uv sync
 ```
 
-### 3.3 .env 設定
+### 4.3 .env 設定
 
 プロジェクトルートに `.env` を作成し、以下の環境変数を設定する。
 
@@ -155,7 +155,7 @@ python3 -c "import bcrypt; print(bcrypt.hashpw(b'<your-pin>', bcrypt.gensalt()).
 
 詳細: [07_oauth.md](07_oauth.md) セクション3, 10
 
-### 3.4 stdioモードでの動作確認
+### 4.4 stdioモードでの動作確認
 
 ```bash
 uv run lisanima
@@ -165,7 +165,7 @@ MCPプロトコルの応答（JSON-RPC）が返ることを確認する。`Ctrl+
 
 ## 5. systemd サービス設定
 
-### 4.1 ユニットファイルの作成
+### 5.1 ユニットファイルの作成
 
 `/etc/systemd/system/lisanima.service` を以下の内容で作成する。
 
@@ -191,7 +191,7 @@ WantedBy=multi-user.target
 - `--http` でStreamable HTTPモード起動（ポート: 8765）
 - ログはstderr → systemd journal に自動収集される（[08_logging.md](08_logging.md) セクション5参照）
 
-### 4.2 有効化・起動
+### 5.2 有効化・起動
 
 ```bash
 sudo systemctl daemon-reload
@@ -199,7 +199,7 @@ sudo systemctl enable lisanima.service
 sudo systemctl start lisanima.service
 ```
 
-### 4.3 状態確認
+### 5.3 状態確認
 
 ```bash
 sudo systemctl status lisanima.service
@@ -209,13 +209,13 @@ sudo systemctl status lisanima.service
 
 ## 6. nginx 設定
 
-### 5.1 SSL証明書の取得
+### 6.1 SSL証明書の取得
 
 ```bash
 sudo certbot certonly --nginx -d <your-domain>
 ```
 
-### 5.2 lisanima用のnginx設定
+### 6.2 lisanima用のnginx設定
 
 `/etc/nginx/sites-available/<your-domain>` のserverブロック内に以下を追加する。
 
@@ -349,14 +349,14 @@ access_log /var/log/nginx/lisanima_access.json json_combined;
 
 詳細: [06_security.md](06_security.md) セクション11.3
 
-### 5.3 設定反映
+### 6.3 設定反映
 
 ```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 5.4 重要な注意事項
+### 6.4 重要な注意事項
 
 - 全てのlisanima向けlocationで `proxy_set_header Host 127.0.0.1:8765;` が必須
 - 3/26 auth specの制約により、OAuthエンドポイント（`/authorize`, `/token`, `/register`）はルートドメインに配置が必要（[07_oauth.md](07_oauth.md) セクション8参照）
