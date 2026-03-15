@@ -364,13 +364,25 @@ sudo systemctl reload nginx
 
 ## 7. バックアップ・cron 初期設定
 
-### 7.1 バックアップディレクトリの作成
+### 7.1 ログディレクトリの作成
+
+監査スクリプト（[33_audit.md](33_audit.md)）のログ出力先を作成する。
+
+```bash
+sudo mkdir -p /var/log/lisanima
+sudo chown <user>:<user> /var/log/lisanima
+```
+
+- `<user>` は lisanima 実行ユーザーに置き換える
+- logrotate設定は [33_audit.md](33_audit.md) セクション4.4を参照
+
+### 7.2 バックアップディレクトリの作成
 
 ```bash
 mkdir -p ~/backup
 ```
 
-### 7.2 crontab 登録
+### 7.3 crontab 登録
 
 ```bash
 crontab -e
