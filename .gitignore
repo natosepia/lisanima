@@ -29,6 +29,9 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Audit config (server-specific)
+audit.conf
+
 # Testing
 .pytest_cache/
 .coverage

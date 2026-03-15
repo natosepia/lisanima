@@ -10,13 +10,24 @@
 # --quiet: WARN/FAILがある場合のみ詳細出力（cron向け）
 
 # =============================================================================
-# 設定
+# 設定（/etc/lisanima/audit.conf で上書き可能）
 # =============================================================================
-DOMAIN="quriowork.com"
-PROJECT_DIR="/home/natosepia/project/lisanima"
-DB_NAME="lisanima_db"
-DB_USER="lisa"
-LOG_DIR="/var/log/lisanima"
+CONF_FILE="/etc/lisanima/audit.conf"
+if [[ -f "$CONF_FILE" ]]; then
+    # shellcheck source=/etc/lisanima/audit.conf
+    source "$CONF_FILE"
+fi
+
+# conf未定義時のデフォルト値
+DOMAIN="${DOMAIN:-quriowork.com}"
+PROJECT_DIR="${PROJECT_DIR:-/home/natosepia/project/lisanima}"
+DB_NAME="${DB_NAME:-lisanima_db}"
+DB_USER="${DB_USER:-lisa}"
+LOG_DIR="${LOG_DIR:-/var/log/lisanima}"
+LISANIMA_PORT="${LISANIMA_PORT:-8765}"
+FAIL2BAN_MAXRETRY="${FAIL2BAN_MAXRETRY:-5}"
+FAIL2BAN_BANTIME="${FAIL2BAN_BANTIME:-86400}"
+
 LOG_FILE="${LOG_DIR}/audit.log"
 ENV_FILE="${PROJECT_DIR}/.env"
 
@@ -366,19 +377,19 @@ check_fail2ban() {
     # maxretry = 5 であること
     local maxretry
     maxretry=$(fail2ban-client get lisanima-pin maxretry 2>/dev/null)
-    if [[ "$maxretry" == "5" ]]; then
-        record "OK" "$category" "maxretry = 5"
+    if [[ "$maxretry" == "${FAIL2BAN_MAXRETRY}" ]]; then
+        record "OK" "$category" "maxretry = ${FAIL2BAN_MAXRETRY}"
     else
-        record "WARN" "$category" "maxretry = ${maxretry:-不明}（5であるべき）"
+        record "WARN" "$category" "maxretry = ${maxretry:-不明}（${FAIL2BAN_MAXRETRY}であるべき）"
     fi
 
     # bantime = 86400 であること
     local bantime
     bantime=$(fail2ban-client get lisanima-pin bantime 2>/dev/null)
-    if [[ "$bantime" == "86400" ]]; then
-        record "OK" "$category" "bantime = 86400（24時間）"
+    if [[ "$bantime" == "${FAIL2BAN_BANTIME}" ]]; then
+        record "OK" "$category" "bantime = ${FAIL2BAN_BANTIME}（24時間）"
     else
-        record "WARN" "$category" "bantime = ${bantime:-不明}（86400であるべき）"
+        record "WARN" "$category" "bantime = ${bantime:-不明}（${FAIL2BAN_BANTIME}であるべき）"
     fi
 
     # 直近24時間のバン件数（fail2ban-clientから現在のバン数を取得）
@@ -408,12 +419,12 @@ check_service() {
 }
 
 check_port_8765() {
-    local category="サービス/ポート8765"
+    local category="サービス/ポート${LISANIMA_PORT}"
 
-    if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:8765"; then
-        record "OK" "$category" "127.0.0.1:8765 リッスン中"
+    if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:${LISANIMA_PORT}"; then
+        record "OK" "$category" "127.0.0.1:${LISANIMA_PORT} リッスン中"
     else
-        record "FAIL" "$category" "127.0.0.1:8765 がリッスンされていません"
+        record "FAIL" "$category" "127.0.0.1:${LISANIMA_PORT} がリッスンされていません"
     fi
 }
 
