@@ -140,7 +140,7 @@ async def handlePinPost(request: Request) -> Response:
     """
     form = await request.form()
     session_id = form.get("session_id", "")
-    pin = form.get("pin", "")
+    pin = form.get("pin", "").strip()
     action = form.get("action", "")
 
     if not session_id:
