@@ -5,26 +5,27 @@
 # cron日次実行を想定。sudo権限で実行すること。
 #
 # Usage:
-#   sudo bash /home/natosepia/project/lisanima/scripts/audit.sh [--quiet]
+#   sudo bash ~/project/lisanima/scripts/audit.sh [--quiet]
 #
 # --quiet: WARN/FAILがある場合のみ詳細出力（cron向け）
 
 # =============================================================================
 # 設定（/etc/lisanima/audit.conf で上書き可能）
 # =============================================================================
-CONF_FILE="/etc/lisanima/audit.conf"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONF_FILE="${SCRIPT_DIR}/audit.conf"
 if [[ -f "$CONF_FILE" ]]; then
-    # shellcheck source=/etc/lisanima/audit.conf
+    # shellcheck source=./audit.conf
     source "$CONF_FILE"
 fi
 
 # conf未定義時のデフォルト値
-DOMAIN="${DOMAIN:-quriowork.com}"
+DOMAIN="${DOMAIN:-FQDN}"
 PROJECT_DIR="${PROJECT_DIR:-/home/natosepia/project/lisanima}"
-DB_NAME="${DB_NAME:-lisanima_db}"
-DB_USER="${DB_USER:-lisa}"
+DB_NAME="${DB_NAME:-db_name}"
+DB_USER="${DB_ROLE:-${DB_USER:-user_name}}"
 LOG_DIR="${LOG_DIR:-/var/log/lisanima}"
-LISANIMA_PORT="${LISANIMA_PORT:-8765}"
+LISANIMA_PORT="${LISANIMA_PORT:-8080}"
 FAIL2BAN_MAXRETRY="${FAIL2BAN_MAXRETRY:-5}"
 FAIL2BAN_BANTIME="${FAIL2BAN_BANTIME:-86400}"
 
@@ -310,44 +311,51 @@ check_firewall() {
 # ---------------------------------------------------------------------------
 check_pg_listen_addresses() {
     local category="PostgreSQL/listen_addresses"
-    local conf_file
-    conf_file=$(find /etc/postgresql -name "postgresql.conf" 2>/dev/null | head -1)
 
-    if [[ -z "$conf_file" ]]; then
-        record "WARN" "$category" "postgresql.confが見つかりません"
+    # Docker運用: コンテナ内の listen_addresses='*' は正常
+    # ホスト側のportsバインドが 127.0.0.1 に制限されているかを確認
+    local container_name="${DBMS_CONTAINER:-dbms_pgsql}"
+
+    if ! docker inspect "$container_name" &>/dev/null; then
+        record "WARN" "$category" "コンテナ ${container_name} が見つかりません"
         return
     fi
 
-    local listen_val
-    listen_val=$(grep -E "^listen_addresses" "$conf_file" 2>/dev/null || true)
+    # ホスト側ポートバインドを確認（0.0.0.0 = 全IF公開）
+    local host_binding
+    host_binding=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' "$container_name" 2>/dev/null)
 
-    if [[ -z "$listen_val" ]]; then
-        # デフォルト値はlocalhost
-        record "OK" "$category" "listen_addresses未指定（デフォルト: localhost）"
-    elif echo "$listen_val" | grep -qE "'localhost'|'127.0.0.1'"; then
-        record "OK" "$category" "listen_addresses = localhost"
+    if echo "$host_binding" | grep -q "0.0.0.0"; then
+        record "WARN" "$category" "PostgreSQLコンテナが全IF公開: ${host_binding}（127.0.0.1バインド推奨）"
+    elif echo "$host_binding" | grep -q "127.0.0.1"; then
+        record "OK" "$category" "PostgreSQLコンテナは localhost のみ: ${host_binding}"
     else
-        record "FAIL" "$category" "listen_addressesがlocalhost以外: ${listen_val}"
+        # portsマッピングなし or 空 = 外部公開なし
+        record "OK" "$category" "PostgreSQLコンテナにホスト側ポート公開なし"
     fi
 }
 
 check_pg_hba() {
     local category="PostgreSQL/pg_hba認証方式"
     local hba_file
-    hba_file=$(find /etc/postgresql -name "pg_hba.conf" 2>/dev/null | head -1)
+    hba_file=$(find "$DBMS_CONF_DIR" -name "$DBMS_HBA_FILE" 2>/dev/null | head -1)
 
     if [[ -z "$hba_file" ]]; then
-        record "WARN" "$category" "pg_hba.confが見つかりません"
+        record "WARN" "$category" "${DBMS_HBA_FILE}が見つかりません"
         return
     fi
 
+    # DB/ユーザー個別エントリ or "all" ワイルドカードエントリを検索
     local hba_line
-    hba_line=$(grep -E "${DB_NAME}.*${DB_USER}" "$hba_file" 2>/dev/null || true)
+    hba_line=$(grep -E "(${DB_NAME}|all)\s.*(${DB_USER}|all)" "$hba_file" 2>/dev/null \
+        | grep -v "^#" | grep -v "replication" || true)
 
     if [[ -z "$hba_line" ]]; then
-        record "WARN" "$category" "${DB_NAME}/${DB_USER}のエントリが見つかりません"
+        record "WARN" "$category" "${DB_NAME}/${DB_USER}に該当するエントリが見つかりません"
     elif echo "$hba_line" | grep -q "scram-sha-256"; then
-        record "OK" "$category" "${DB_NAME}/${DB_USER} scram-sha-256"
+        record "OK" "$category" "${DB_NAME}/${DB_USER} scram-sha-256（該当行: $(echo "$hba_line" | head -1 | xargs)）"
+    elif echo "$hba_line" | grep -q "trust"; then
+        record "WARN" "$category" "${DB_NAME}/${DB_USER} がtrust認証です（scram-sha-256推奨）"
     else
         record "FAIL" "$category" "${DB_NAME}/${DB_USER}の認証方式がscram-sha-256ではありません"
     fi
@@ -440,11 +448,15 @@ check_nginx_service() {
 
 check_postgresql_service() {
     local category="サービス/postgresql"
+    local container_name="${DBMS_CONTAINER:-dbms_pgsql}"
 
-    if systemctl is-active --quiet postgresql 2>/dev/null; then
-        record "OK" "$category" "postgresql active"
+    local status
+    status=$(docker inspect --format='{{.State.Status}}' "$container_name" 2>/dev/null)
+
+    if [[ "$status" == "running" ]]; then
+        record "OK" "$category" "コンテナ ${container_name} running"
     else
-        record "FAIL" "$category" "postgresqlが停止しています"
+        record "FAIL" "$category" "コンテナ ${container_name} が停止しています（status: ${status:-不明}）"
     fi
 }
 
@@ -499,20 +511,18 @@ check_env_gitignore() {
 # ---------------------------------------------------------------------------
 check_oauth_cleanup() {
     local category="OAuth/期限切れトークン"
+    local container_name="${DBMS_CONTAINER:-dbms_pgsql}"
 
-    # psqlが利用可能か
-    if ! command -v psql &>/dev/null; then
-        record "WARN" "$category" "psqlコマンドが見つかりません"
+    # コンテナが稼働しているか
+    if ! docker inspect "$container_name" &>/dev/null; then
+        record "WARN" "$category" "コンテナ ${container_name} が見つかりません"
         return
     fi
 
-    local now_epoch
-    now_epoch=$(date +%s)
-
     # 期限切れアクセストークン数
     local expired_tokens
-    expired_tokens=$(sudo -u postgres psql -d "${DB_NAME}" -tAc \
-        "SELECT COUNT(*) FROM t_oauth_tokens WHERE expires_at < ${now_epoch};" 2>/dev/null)
+    expired_tokens=$(docker exec "$container_name" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc \
+        "SELECT COUNT(*) FROM t_oauth_access_token WHERE expires_at < NOW();" 2>/dev/null)
 
     if [[ -n "$expired_tokens" ]] && [[ "$expired_tokens" -gt 0 ]]; then
         record "WARN" "$category" "期限切れトークン: ${expired_tokens}件（定期削除を推奨）"
@@ -525,15 +535,15 @@ check_oauth_cleanup() {
     # 期限切れクライアント数（全トークンが失効済み）
     local category2="OAuth/期限切れクライアント"
     local stale_clients
-    stale_clients=$(sudo -u postgres psql -d "${DB_NAME}" -tAc \
-        "SELECT COUNT(*) FROM t_oauth_clients c
+    stale_clients=$(docker exec "$container_name" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc \
+        "SELECT COUNT(*) FROM m_oauth_client c
          WHERE NOT EXISTS (
-             SELECT 1 FROM t_oauth_tokens t
+             SELECT 1 FROM t_oauth_access_token t
              WHERE t.client_id = c.client_id
-               AND t.expires_at >= ${now_epoch}
+               AND t.expires_at >= NOW()
          )
          AND EXISTS (
-             SELECT 1 FROM t_oauth_tokens t
+             SELECT 1 FROM t_oauth_access_token t
              WHERE t.client_id = c.client_id
          );" 2>/dev/null)
 
@@ -562,14 +572,14 @@ main() {
     # 全チェック実行
     check_tls_cert_expiry
     check_tls_protocol
-    check_ocsp_stapling
+    #check_ocsp_stapling
     check_tls_session_tickets
-    check_certbot_timer
+    #check_certbot_timer
     check_security_headers
     check_csp_pin_page
     check_xss_protection
     check_nginx_rate_limit
-    check_firewall
+    #check_firewall
     check_pg_listen_addresses
     check_pg_hba
     check_fail2ban

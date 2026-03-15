@@ -96,6 +96,7 @@ def _recordFailure() -> None:
         logger.warning("PIN認証ロックアウト: %d秒間", _LOCKOUT_SECONDS)
 
 
+
 def _resetFailures() -> None:
     """PIN検証成功時に失敗カウンタをリセットする。"""
     global _failure_count, _lockout_until
@@ -179,6 +180,7 @@ async def handlePinPost(request: Request) -> Response:
     # PIN検証
     if not _verifyPin(pin):
         _recordFailure()
+        logger.warning("PIN認証失敗: ip=%s", request.client.host)
         remaining = _MAX_FAILURES - _failure_count
         error_msg = f"PINが正しくありません（残り{remaining}回）" if remaining > 0 else "ロックアウトされました。しばらくお待ちください。"
         template = _loadTemplate()
