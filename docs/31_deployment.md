@@ -145,6 +145,7 @@ uv sync
 | `DB_NAME` | データベース名（`lisanima_db`） |
 | `DB_USER` | DBロール名（`lisa`） |
 | `DB_PASSWORD` | DBロールのパスワード |
+| `LISANIMA_FQDN` | HTTPモード時のFQDN（例: `quriowork.com`）。issuer_url / resource_server_url の生成に使用 |
 | `OAUTH_PIN_HASH` | PIN認証用bcryptハッシュ |
 
 PINハッシュの生成:

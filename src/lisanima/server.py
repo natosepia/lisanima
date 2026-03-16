@@ -6,6 +6,7 @@ HTTPモードではOAuth 2.1認証を有効にする。
 """
 import argparse
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -81,9 +82,16 @@ def _createMcp() -> FastMCP:
         )
         from lisanima.auth.provider import LisanimaOAuthProvider
 
+        fqdn = os.environ.get("LISANIMA_FQDN")
+        if not fqdn:
+            raise RuntimeError(
+                "環境変数 LISANIMA_FQDN が未設定です。"
+                "HTTPモードでは LISANIMA_FQDN の設定が必須です。"
+            )
+
         auth_settings = AuthSettings(
-            issuer_url="https://quriowork.com",
-            resource_server_url="https://quriowork.com/lisanima/mcp",
+            issuer_url=f"https://{fqdn}",
+            resource_server_url=f"https://{fqdn}/lisanima/mcp",
             client_registration_options=ClientRegistrationOptions(
                 enabled=True,
                 valid_scopes=[],
