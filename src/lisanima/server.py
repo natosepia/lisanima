@@ -15,8 +15,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from lisanima.db import db_pool
-from lisanima.tools.remember import remember as remember_impl
-from lisanima.tools.recall import recall as recall_impl
+from lisanima.interface.remember import remember as remember_impl
+from lisanima.interface.recall import recall as recall_impl
 
 # stdoutはMCPプロトコル通信に使うため、loggingはstderrに出す
 logging.basicConfig(

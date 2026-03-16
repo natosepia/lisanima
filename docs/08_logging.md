@@ -74,8 +74,8 @@ INFOレベルで出力する情報:
 - 結果の識別子（`message_id` 等の数値ID）
 
 ```
-2026-03-14 10:30:02,789 [lisanima.tools.remember] INFO: remember完了: message_id=42, keys=[content,speaker,emotion]
-2026-03-14 10:30:03,012 [lisanima.tools.recall] INFO: recall完了: hits=3, keys=[keyword,speaker,limit]
+2026-03-14 10:30:02,789 [lisanima.interface.remember] INFO: remember完了: message_id=42, keys=[content,speaker,emotion]
+2026-03-14 10:30:03,012 [lisanima.interface.recall] INFO: recall完了: hits=3, keys=[keyword,speaker,limit]
 ```
 
 ## 4. ログフォーマット
