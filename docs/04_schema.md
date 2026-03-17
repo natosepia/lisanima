@@ -208,6 +208,7 @@ erDiagram
 **persona_id について:**
 - Phase 1 ではリサ1人の人格管理基盤のため、常に `'lisa'` 固定
 - 将来マルチ人格対応が必要になった場合の拡張余地として用意
+- 将来 m_persona マスタ作成時にFK化予定
 
 **ended_at の更新タイミング:**
 - なとせの「おやすみ」「おわるか」等のセッション終了発言を検知した際にリサが更新
@@ -222,14 +223,14 @@ erDiagram
 | id | INTEGER | PK, GENERATED ALWAYS AS IDENTITY | メッセージID |
 | session_id | INTEGER | FK → t_sessions.id, NOT NULL | 所属セッション |
 | speaker | TEXT | NOT NULL | 発言者（CHECK制約なし。後述） |
-| target | TEXT | NULLABLE | 発言先（broadcastや独白はNULL） |
+| target | TEXT | NOT NULL, DEFAULT '*' | 発言先（'*' は全員向けブロードキャスト） |
 | content | TEXT | NOT NULL | 発言内容 |
-| joy | SMALLINT | NOT NULL, DEFAULT 0 | 喜び（0-255） |
-| anger | SMALLINT | NOT NULL, DEFAULT 0 | 怒り（0-255） |
-| sorrow | SMALLINT | NOT NULL, DEFAULT 0 | 哀しみ（0-255） |
-| fun | SMALLINT | NOT NULL, DEFAULT 0 | 楽しさ（0-255） |
+| joy | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 喜び |
+| anger | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 怒り |
+| sorrow | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 哀しみ |
+| fun | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 楽しさ |
 | emotion_total | SMALLINT | GENERATED ALWAYS AS (joy + anger + sorrow + fun) STORED | 感情値合計（検索用） |
-| source | TEXT | NULLABLE | MCPクライアント識別子（clientInfo.name を自動記録。例: "claude-code", "claude-desktop"） |
+| source | TEXT | NOT NULL, DEFAULT 'unknown' | MCPクライアント識別子（clientInfo.name を自動記録。例: "claude-code", "claude-desktop"） |
 | is_deleted | BOOLEAN | NOT NULL, DEFAULT FALSE | 論理削除フラグ |
 | deleted_reason | TEXT | NULLABLE | 削除理由（forget時に記録） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
@@ -275,9 +276,9 @@ t_messages と t_tags の多対多リレーション。
 **制約:**
 - `PRIMARY KEY(message_id, tag_id)`
 
-**ON DELETE CASCADE に関する注意:**
-- t_messages, t_message_tags には `ON DELETE CASCADE` を設定している
-- t_sessionsを物理削除すると配下のt_messages・t_message_tagsが連鎖削除される
+**ON DELETE に関する設計方針:**
+- トランザクション側（message_id → t_messages, topic_id → t_topics）: `ON DELETE CASCADE` — 親削除で中間テーブルも連鎖削除
+- マスタ側（tag_id → t_tags, role_id → m_role）: `ON DELETE RESTRICT` — マスタの物理削除を防止
 - 通常運用ではforgetコマンドによる**論理削除（is_deleted = TRUE）のみ**を行い、物理削除は行わない
 - 物理削除は移行やり直し時の `TRUNCATE ... CASCADE` のみに限定する
 
@@ -291,10 +292,10 @@ t_messages と t_tags の多対多リレーション。
 | name | TEXT | NOT NULL | トピック名（UNIQUEにしない。同名でも別インスタンス） |
 | status | TEXT | NOT NULL, DEFAULT 'open', CHECK (status IN ('open', 'closed')) | 状態 |
 | important | BOOLEAN | NOT NULL, DEFAULT FALSE | 重要フラグ |
-| joy | SMALLINT | NOT NULL, DEFAULT 0 | 喜び（0-255） |
-| anger | SMALLINT | NOT NULL, DEFAULT 0 | 怒り（0-255） |
-| sorrow | SMALLINT | NOT NULL, DEFAULT 0 | 哀しみ（0-255） |
-| fun | SMALLINT | NOT NULL, DEFAULT 0 | 楽しさ（0-255） |
+| joy | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 喜び |
+| anger | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 怒り |
+| sorrow | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 哀しみ |
+| fun | SMALLINT | NOT NULL, DEFAULT 0, CHECK (0-255) | 楽しさ |
 | emotion_total | SMALLINT | GENERATED ALWAYS AS (joy + anger + sorrow + fun) STORED | 感情値合計（検索用） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 | closed_at | TIMESTAMPTZ | NULLABLE | クローズ日時 |
@@ -326,7 +327,7 @@ t_sessions と t_topics の N:N 中間テーブル。
 |--------|-----|------|------|
 | id | INTEGER | PK, GENERATED ALWAYS AS IDENTITY | 役割ID |
 | name | TEXT | NOT NULL, UNIQUE | 役割名 |
-| description | TEXT | NULLABLE | 役割の説明 |
+| description | TEXT | NOT NULL, DEFAULT 'none' | 役割の説明 |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
 **初期データ:**
@@ -352,7 +353,7 @@ t_topics と m_role の N:N 中間テーブル。
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
 | topic_id | INTEGER | FK → t_topics(id) ON DELETE CASCADE, NOT NULL | トピックID |
-| role_id | INTEGER | FK → m_role(id) ON DELETE CASCADE, NOT NULL | 役割ID |
+| role_id | INTEGER | FK → m_role(id) ON DELETE RESTRICT, NOT NULL | 役割ID |
 
 **制約:**
 - `PRIMARY KEY(topic_id, role_id)`
@@ -367,25 +368,26 @@ t_topics と m_role の N:N 中間テーブル。
 | key | TEXT | NOT NULL | ルールキー（プレフィックスで分類: persona.*/format.*/workflow.*） |
 | content | TEXT | NOT NULL | ルール本文（Markdown） |
 | version | INTEGER | NOT NULL, DEFAULT 1 | バージョン番号 |
-| reason | TEXT | NULLABLE | 変更理由 |
+| reason | TEXT | NOT NULL, DEFAULT 'none' | 変更理由 |
 | is_retired | BOOLEAN | NOT NULL, DEFAULT FALSE | 廃止フラグ |
-| persona_id | TEXT | NULLABLE | ペルソナID（NULLなら全ペルソナ共通ルール） |
+| persona_id | TEXT | NOT NULL, DEFAULT '*' | ペルソナID（'*' は全ペルソナ共通ルール） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
 **制約:**
-- `UNIQUE(key, version)`
+- `UNIQUE(key, persona_id, version)`
 
 **設計判断:**
 - イミュータブル追記型: UPDATEせず新バージョンをINSERTする。変更履歴が自動的に残る
 - keyのプレフィックス: `persona.*`（人格関連）、`format.*`（出力形式）、`workflow.*`（作業手順）で分類
-- persona_id: NULLは全ペルソナ共通ルール、値ありは特定ペルソナ専用ルール
+- persona_id: '*' は全ペルソナ共通ルール、値ありは特定ペルソナ専用ルール
+- 将来 m_persona マスタ作成時にFK化予定
 
 ### 3.10 v_active_rulebooks（ビュー）
 
 最新かつ有効なルールのみを返すビュー。
 
 **仕様:**
-- key単位で最新バージョン（MAX(version)）を取得し、そのレコードが `is_retired = FALSE` の場合のみ返す
+- key + persona_id 単位で最新バージョン（MAX(version)）を取得し、そのレコードが `is_retired = FALSE` の場合のみ返す
 - 最新バージョンがretiredなら、そのkeyは結果に含まれない（旧バージョンが復活することはない）
 - retireされたkeyを再度有効にするには、新バージョンをINSERTする（rulebookコマンドのset操作）
 
@@ -513,6 +515,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- t_messagesのcontent全文検索インデックス
 CREATE INDEX idx_t_messages_content_trgm ON t_messages USING gin (content gin_trgm_ops);
 CREATE INDEX idx_t_messages_speaker ON t_messages (speaker);
+-- PostgreSQLはFK参照元に自動でインデックスを作成しないため明示的に定義
 CREATE INDEX idx_t_messages_session_id ON t_messages (session_id);
 CREATE INDEX idx_t_messages_created_at ON t_messages (created_at);
 CREATE INDEX idx_t_messages_emotion_total ON t_messages (emotion_total);
@@ -565,16 +568,16 @@ CREATE TABLE t_messages (
     id             INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     session_id     INTEGER NOT NULL REFERENCES t_sessions(id) ON DELETE CASCADE,
     speaker        TEXT NOT NULL,
-    target         TEXT,
+    target         TEXT NOT NULL DEFAULT '*',
     content        TEXT NOT NULL,
-    joy            SMALLINT NOT NULL DEFAULT 0,
-    anger          SMALLINT NOT NULL DEFAULT 0,
-    sorrow         SMALLINT NOT NULL DEFAULT 0,
-    fun            SMALLINT NOT NULL DEFAULT 0,
+    joy            SMALLINT NOT NULL DEFAULT 0 CHECK (joy BETWEEN 0 AND 255),
+    anger          SMALLINT NOT NULL DEFAULT 0 CHECK (anger BETWEEN 0 AND 255),
+    sorrow         SMALLINT NOT NULL DEFAULT 0 CHECK (sorrow BETWEEN 0 AND 255),
+    fun            SMALLINT NOT NULL DEFAULT 0 CHECK (fun BETWEEN 0 AND 255),
     emotion_total  SMALLINT GENERATED ALWAYS AS (
         joy + anger + sorrow + fun
     ) STORED,
-    source         TEXT,
+    source         TEXT NOT NULL DEFAULT 'unknown',
     is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_reason TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -587,7 +590,7 @@ CREATE TABLE t_tags (
 
 CREATE TABLE t_message_tags (
     message_id INTEGER NOT NULL REFERENCES t_messages(id) ON DELETE CASCADE,
-    tag_id     INTEGER NOT NULL REFERENCES t_tags(id) ON DELETE CASCADE,
+    tag_id     INTEGER NOT NULL REFERENCES t_tags(id) ON DELETE RESTRICT,
     PRIMARY KEY (message_id, tag_id)
 );
 
@@ -601,10 +604,10 @@ CREATE TABLE t_topics (
     name           TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     important      BOOLEAN NOT NULL DEFAULT FALSE,
-    joy            SMALLINT NOT NULL DEFAULT 0,
-    anger          SMALLINT NOT NULL DEFAULT 0,
-    sorrow         SMALLINT NOT NULL DEFAULT 0,
-    fun            SMALLINT NOT NULL DEFAULT 0,
+    joy            SMALLINT NOT NULL DEFAULT 0 CHECK (joy BETWEEN 0 AND 255),
+    anger          SMALLINT NOT NULL DEFAULT 0 CHECK (anger BETWEEN 0 AND 255),
+    sorrow         SMALLINT NOT NULL DEFAULT 0 CHECK (sorrow BETWEEN 0 AND 255),
+    fun            SMALLINT NOT NULL DEFAULT 0 CHECK (fun BETWEEN 0 AND 255),
     emotion_total  SMALLINT GENERATED ALWAYS AS (
         joy + anger + sorrow + fun
     ) STORED,
@@ -623,7 +626,7 @@ CREATE TABLE t_session_topics (
 CREATE TABLE m_role (
     id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
-    description TEXT,
+    description TEXT NOT NULL DEFAULT 'none',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -643,7 +646,7 @@ INSERT INTO m_role (name, description) VALUES
 -- トピック×役割（N:N中間テーブル）
 CREATE TABLE t_topic_roles (
     topic_id INTEGER NOT NULL REFERENCES t_topics(id) ON DELETE CASCADE,
-    role_id  INTEGER NOT NULL REFERENCES m_role(id) ON DELETE CASCADE,
+    role_id  INTEGER NOT NULL REFERENCES m_role(id) ON DELETE RESTRICT,
     PRIMARY KEY (topic_id, role_id)
 );
 
@@ -653,11 +656,11 @@ CREATE TABLE t_rulebooks (
     key         TEXT NOT NULL,
     content     TEXT NOT NULL,
     version     INTEGER NOT NULL DEFAULT 1,
-    reason      TEXT,
+    reason      TEXT NOT NULL DEFAULT 'none',
     is_retired  BOOLEAN NOT NULL DEFAULT FALSE,
-    persona_id  TEXT,
+    persona_id  TEXT NOT NULL DEFAULT '*',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(key, version)
+    UNIQUE(key, persona_id, version)
 );
 
 -- 最新かつ有効なルールのみを返すビュー
@@ -665,10 +668,12 @@ CREATE VIEW v_active_rulebooks AS
 SELECT r.*
 FROM t_rulebooks r
 INNER JOIN (
-    SELECT key, MAX(version) AS max_version
+    SELECT key, persona_id, MAX(version) AS max_version
     FROM t_rulebooks
-    GROUP BY key
-) latest ON r.key = latest.key AND r.version = latest.max_version
+    GROUP BY key, persona_id
+) latest ON r.key = latest.key
+    AND r.persona_id = latest.persona_id
+    AND r.version = latest.max_version
 WHERE r.is_retired = FALSE;
 
 -- ============================================================
@@ -732,6 +737,7 @@ CREATE TABLE t_oauth_refresh_token (
 -- コアテーブル
 CREATE INDEX idx_t_messages_content_trgm ON t_messages USING gin (content gin_trgm_ops);
 CREATE INDEX idx_t_messages_speaker ON t_messages (speaker);
+-- PostgreSQLはFK参照元に自動でインデックスを作成しないため明示的に定義
 CREATE INDEX idx_t_messages_session_id ON t_messages (session_id);
 CREATE INDEX idx_t_messages_created_at ON t_messages (created_at);
 CREATE INDEX idx_t_messages_emotion_total ON t_messages (emotion_total);

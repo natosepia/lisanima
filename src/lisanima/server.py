@@ -138,7 +138,6 @@ if _args.http:
 async def remember(
     content: str,
     speaker: str,
-    category: str = "session",
     target: str | None = None,
     emotion: dict | None = None,
     tags: list[str] | None = None,
@@ -153,7 +152,6 @@ async def remember(
     Args:
         content: 発言・記憶の内容
         speaker: 発言者名（リサ / なとせ / ありす / 桃華 / ほたる / 晶葉）
-        category: 種別。session / backlog / knowledge / discussion / report
         target: 発言先（省略時はbroadcast）
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
         tags: タグ名の配列（連想記憶用）
@@ -163,7 +161,6 @@ async def remember(
     return await remember_impl(
         content=content,
         speaker=speaker,
-        category=category,
         target=target,
         emotion=emotion,
         tags=tags,
@@ -177,7 +174,6 @@ async def recall(
     query: str | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
-    category: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     min_emotion: int | None = None,
@@ -193,7 +189,6 @@ async def recall(
         query: 全文検索キーワード
         tags: タグ名でフィルタ（AND検索）
         speaker: 発言者でフィルタ
-        category: 種別でフィルタ
         date_from: 日付範囲の開始（YYYY-MM-DD）
         date_to: 日付範囲の終了（YYYY-MM-DD）
         min_emotion: 感情値合計の下限
@@ -204,7 +199,6 @@ async def recall(
         query=query,
         tags=tags,
         speaker=speaker,
-        category=category,
         date_from=date_from,
         date_to=date_to,
         min_emotion=min_emotion,

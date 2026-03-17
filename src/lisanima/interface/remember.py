@@ -60,24 +60,24 @@ def _validateParams(
 async def remember(
     content: str,
     speaker: str,
-    category: str = "session",
     target: str | None = None,
     emotion: dict | None = None,
     tags: list[str] | None = None,
     project: str | None = None,
     session_date: str | None = None,
+    source: str = "unknown",
 ) -> dict:
     """記憶を保存する。
 
     Args:
         content: 発言・記憶の内容
         speaker: 発言者名
-        category: 種別（session / backlog / knowledge / discussion / report）
         target: 発言先
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
         tags: タグ名の配列
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD
+        source: MCPクライアント識別子
 
     Returns:
         {"message_id": int, "session_id": int, "tags_created": list, "status": "saved"}
@@ -89,17 +89,7 @@ async def remember(
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
-    # 感情値エンコード
     emo = emotion or {}
-    try:
-        emotion_encoded = message_repo.encodeEmotion(
-            joy=emo.get("joy", 0),
-            anger=emo.get("anger", 0),
-            sorrow=emo.get("sorrow", 0),
-            fun=emo.get("fun", 0),
-        )
-    except ValueError as e:
-        return {"error": "INVALID_PARAMETER", "message": str(e)}
 
     try:
         async with db_pool.get_connection() as conn:
@@ -113,11 +103,14 @@ async def remember(
                 message = await message_repo.insertMessage(
                     conn,
                     session_id=session["id"],
-                    category=category,
                     speaker=speaker,
                     content=content,
-                    emotion=emotion_encoded,
+                    joy=emo.get("joy", 0),
+                    anger=emo.get("anger", 0),
+                    sorrow=emo.get("sorrow", 0),
+                    fun=emo.get("fun", 0),
                     target=target,
+                    source=source,
                 )
 
                 # タグ処理

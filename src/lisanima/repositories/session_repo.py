@@ -1,6 +1,6 @@
 """セッションリポジトリ
 
-sessions テーブルへのCRUD操作を提供する。
+t_sessions テーブルへのCRUD操作を提供する。
 """
 import logging
 from datetime import date
@@ -35,7 +35,7 @@ async def findOrCreateSession(
             # FOR UPDATE でロックを取得し、並行INSERT時のrace conditionを防止
             await cur.execute(
                 """
-                SELECT * FROM sessions
+                SELECT * FROM t_sessions
                 WHERE date = %s AND persona_id = %s
                 ORDER BY session_seq DESC
                 LIMIT 1
@@ -55,7 +55,7 @@ async def findOrCreateSession(
             # 新規セッション作成
             await cur.execute(
                 """
-                INSERT INTO sessions (persona_id, date, session_seq, project)
+                INSERT INTO t_sessions (persona_id, date, session_seq, project)
                 VALUES (%s, %s, 1, %s)
                 RETURNING *
                 """,
@@ -85,7 +85,7 @@ async def endSession(
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            UPDATE sessions SET ended_at = NOW()
+            UPDATE t_sessions SET ended_at = NOW()
             WHERE id = %s
             RETURNING *
             """,

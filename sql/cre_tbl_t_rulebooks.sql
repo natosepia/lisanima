@@ -6,9 +6,9 @@ CREATE TABLE t_rulebooks (
     key         TEXT NOT NULL,
     content     TEXT NOT NULL,
     version     INTEGER NOT NULL DEFAULT 1,
-    reason      TEXT,
+    reason      TEXT NOT NULL DEFAULT 'none',
     is_retired  BOOLEAN NOT NULL DEFAULT FALSE,
-    persona_id  TEXT,
+    persona_id  TEXT NOT NULL DEFAULT '*',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(key, version)
+    UNIQUE(key, persona_id, version)
 );

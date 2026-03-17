@@ -1,6 +1,6 @@
 """メッセージリポジトリ
 
-messages テーブルへのCRUD操作を提供する。
+t_messages テーブルへのCRUD操作を提供する。
 """
 import logging
 
@@ -9,82 +9,48 @@ from psycopg import AsyncConnection, sql
 logger = logging.getLogger(__name__)
 
 
-def encodeEmotion(joy: int = 0, anger: int = 0, sorrow: int = 0, fun: int = 0) -> int:
-    """感情ベクトルを4バイト整数にエンコードする。
-
-    Args:
-        joy: 喜び (0-255)
-        anger: 怒り (0-255)
-        sorrow: 哀しみ (0-255)
-        fun: 楽しさ (0-255)
-
-    Returns:
-        符号付き32bit整数
-    """
-    for name, val in [("joy", joy), ("anger", anger), ("sorrow", sorrow), ("fun", fun)]:
-        if not 0 <= val <= 255:
-            raise ValueError(f"{name} は 0〜255 の範囲で指定してください: {val}")
-
-    unsigned = (joy << 24) | (anger << 16) | (sorrow << 8) | fun
-    # Pythonは任意精度整数なので、PostgreSQL互換の符号付き32bitに変換
-    if unsigned >= 0x80000000:
-        return unsigned - 0x100000000
-    return unsigned
-
-
-def decodeEmotion(emotion: int) -> dict:
-    """4バイト整数から感情ベクトルをデコードする。
-
-    Args:
-        emotion: 符号付き32bit整数
-
-    Returns:
-        {"joy": int, "anger": int, "sorrow": int, "fun": int}
-    """
-    # 符号付き→符号なしに変換
-    if emotion < 0:
-        emotion += 0x100000000
-
-    return {
-        "joy": (emotion >> 24) & 0xFF,
-        "anger": (emotion >> 16) & 0xFF,
-        "sorrow": (emotion >> 8) & 0xFF,
-        "fun": emotion & 0xFF,
-    }
-
-
 async def insertMessage(
     conn: AsyncConnection,
     session_id: int,
-    category: str,
     speaker: str,
     content: str,
-    emotion: int = 0,
+    joy: int = 0,
+    anger: int = 0,
+    sorrow: int = 0,
+    fun: int = 0,
     target: str | None = None,
+    source: str = "unknown",
 ) -> dict:
     """メッセージを保存する。
 
     Args:
         conn: DB接続
         session_id: セッションID
-        category: 種別
         speaker: 発言者
         content: 発言内容
-        emotion: 感情ベクトル（エンコード済み）
-        target: 発言先
+        joy: 喜び (0-255)
+        anger: 怒り (0-255)
+        sorrow: 哀しみ (0-255)
+        fun: 楽しさ (0-255)
+        target: 発言先（Noneの場合は'*'をデフォルト）
+        source: MCPクライアント識別子
 
     Returns:
         保存したメッセージのdict
     """
+    # targetがNoneの場合はDBデフォルトに合わせて'*'を設定
+    if target is None:
+        target = "*"
+
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO messages (session_id, category, speaker, content, emotion, target)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id, session_id, category, speaker, target, content,
-                      emotion, emotion_total, is_deleted, created_at
+            INSERT INTO t_messages (session_id, speaker, content, joy, anger, sorrow, fun, target, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, session_id, speaker, target, content,
+                      joy, anger, sorrow, fun, emotion_total, source, is_deleted, created_at
             """,
-            (session_id, category, speaker, content, emotion, target),
+            (session_id, speaker, content, joy, anger, sorrow, fun, target, source),
         )
         msg = await cur.fetchone()
         logger.debug("メッセージ保存: id=%s, session_id=%s", msg["id"], session_id)
@@ -96,21 +62,19 @@ async def searchMessages(
     query: str | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
-    category: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     min_emotion: int | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
-    """メッセージを検索する。
+    """t_messages テーブルからメッセージを検索する。
 
     Args:
         conn: DB接続
         query: 全文検索キーワード
         tags: タグ名フィルタ（AND検索）
         speaker: 発言者フィルタ
-        category: 種別フィルタ
         date_from: 日付範囲開始（YYYY-MM-DD）
         date_to: 日付範囲終了（YYYY-MM-DD）
         min_emotion: 最低感情値合計
@@ -133,10 +97,6 @@ async def searchMessages(
         conditions.append("m.speaker = %s")
         params.append(speaker)
 
-    if category:
-        conditions.append("m.category = %s")
-        params.append(category)
-
     if min_emotion is not None:
         conditions.append("m.emotion_total >= %s")
         params.append(min_emotion)
@@ -153,8 +113,8 @@ async def searchMessages(
     tag_join = ""
     if tags:
         tag_join = """
-            JOIN message_tags mt ON m.id = mt.message_id
-            JOIN tags t ON mt.tag_id = t.id
+            JOIN t_message_tags mt ON m.id = mt.message_id
+            JOIN t_tags t ON mt.tag_id = t.id
         """
         placeholders = ", ".join(["%s"] * len(tags))
         conditions.append(f"t.name IN ({placeholders})")
@@ -188,8 +148,8 @@ async def searchMessages(
         count_sql = f"""
             SELECT COUNT(*) FROM (
                 SELECT m.id
-                FROM messages m
-                JOIN sessions s ON m.session_id = s.id
+                FROM t_messages m
+                JOIN t_sessions s ON m.session_id = s.id
                 {tag_join}
                 WHERE {where_clause}
                 {group_by}
@@ -201,10 +161,11 @@ async def searchMessages(
 
         # データ取得
         data_sql = f"""
-            SELECT m.id, s.date AS session_date, m.category, m.speaker, m.target,
-                   m.content, m.emotion, m.emotion_total, m.created_at
-            FROM messages m
-            JOIN sessions s ON m.session_id = s.id
+            SELECT m.id, s.date AS session_date, m.speaker, m.target,
+                   m.content, m.joy, m.anger, m.sorrow, m.fun,
+                   m.emotion_total, m.created_at
+            FROM t_messages m
+            JOIN t_sessions s ON m.session_id = s.id
             {tag_join}
             WHERE {where_clause}
             {group_by}
@@ -226,10 +187,15 @@ async def searchMessages(
     if message_ids:
         tags_by_msg = await _getMessageTagsBatch(conn, message_ids)
 
-    # 感情値をデコードして返す
+    # 感情値を辞書にまとめて返す
     for row in rows:
         msg = dict(row)
-        msg["emotion"] = decodeEmotion(msg["emotion"])
+        msg["emotion"] = {
+            "joy": msg.pop("joy"),
+            "anger": msg.pop("anger"),
+            "sorrow": msg.pop("sorrow"),
+            "fun": msg.pop("fun"),
+        }
         msg["tags"] = tags_by_msg.get(msg["id"], [])
         messages.append(msg)
 
@@ -255,8 +221,8 @@ async def _getMessageTagsBatch(
         await cur.execute(
             f"""
             SELECT mt.message_id, t.name
-            FROM message_tags mt
-            JOIN tags t ON mt.tag_id = t.id
+            FROM t_message_tags mt
+            JOIN t_tags t ON mt.tag_id = t.id
             WHERE mt.message_id IN ({placeholders})
             ORDER BY t.name
             """,

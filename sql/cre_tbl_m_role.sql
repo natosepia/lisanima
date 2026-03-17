@@ -4,7 +4,7 @@
 CREATE TABLE m_role (
     id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
-    description TEXT,
+    description TEXT NOT NULL DEFAULT 'none',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

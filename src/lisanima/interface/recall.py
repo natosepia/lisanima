@@ -61,7 +61,6 @@ async def recall(
     query: str | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
-    category: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
     min_emotion: int | None = None,
@@ -74,7 +73,6 @@ async def recall(
         query: 全文検索キーワード
         tags: タグ名でフィルタ（AND検索）
         speaker: 発言者でフィルタ
-        category: 種別でフィルタ
         date_from: 日付範囲の開始（YYYY-MM-DD）
         date_to: 日付範囲の終了（YYYY-MM-DD）
         min_emotion: 感情値合計の下限
@@ -98,7 +96,6 @@ async def recall(
                 query=query,
                 tags=tags,
                 speaker=speaker,
-                category=category,
                 date_from=date_from,
                 date_to=date_to,
                 min_emotion=min_emotion,

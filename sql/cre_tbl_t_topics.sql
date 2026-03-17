@@ -6,10 +6,10 @@ CREATE TABLE t_topics (
     name           TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     important      BOOLEAN NOT NULL DEFAULT FALSE,
-    joy            SMALLINT NOT NULL DEFAULT 0,
-    anger          SMALLINT NOT NULL DEFAULT 0,
-    sorrow         SMALLINT NOT NULL DEFAULT 0,
-    fun            SMALLINT NOT NULL DEFAULT 0,
+    joy            SMALLINT NOT NULL DEFAULT 0 CHECK (joy BETWEEN 0 AND 255),
+    anger          SMALLINT NOT NULL DEFAULT 0 CHECK (anger BETWEEN 0 AND 255),
+    sorrow         SMALLINT NOT NULL DEFAULT 0 CHECK (sorrow BETWEEN 0 AND 255),
+    fun            SMALLINT NOT NULL DEFAULT 0 CHECK (fun BETWEEN 0 AND 255),
     emotion_total  SMALLINT GENERATED ALWAYS AS (
         joy + anger + sorrow + fun
     ) STORED,

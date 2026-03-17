@@ -1,6 +1,6 @@
 """タグリポジトリ
 
-tags テーブルおよび message_tags テーブルへの操作を提供する。
+t_tags テーブルおよび t_message_tags テーブルへの操作を提供する。
 """
 import logging
 import unicodedata
@@ -51,7 +51,7 @@ async def findOrCreateTags(
             # INSERT ... ON CONFLICT でupsert
             await cur.execute(
                 """
-                INSERT INTO tags (name) VALUES (%s)
+                INSERT INTO t_tags (name) VALUES (%s)
                 ON CONFLICT (name) DO NOTHING
                 RETURNING id, name
                 """,
@@ -63,7 +63,7 @@ async def findOrCreateTags(
             else:
                 # 既に存在する場合はSELECT
                 await cur.execute(
-                    "SELECT id, name FROM tags WHERE name = %s",
+                    "SELECT id, name FROM t_tags WHERE name = %s",
                     (name,),
                 )
                 tags.append(await cur.fetchone())
@@ -91,7 +91,7 @@ async def linkMessageTags(
         for tag_id in tag_ids:
             await cur.execute(
                 """
-                INSERT INTO message_tags (message_id, tag_id)
+                INSERT INTO t_message_tags (message_id, tag_id)
                 VALUES (%s, %s)
                 ON CONFLICT DO NOTHING
                 """,
