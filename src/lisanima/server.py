@@ -17,6 +17,7 @@ from starlette.responses import Response
 
 from lisanima.db import db_pool
 from lisanima.interface.forget import forget as forget_impl
+from lisanima.interface.organize import organize as organize_impl
 from lisanima.interface.recall import recall as recall_impl
 from lisanima.interface.remember import remember as remember_impl
 from lisanima.interface.rulebook import rulebook as rulebook_impl
@@ -267,6 +268,59 @@ async def topic_manage(
         roles=roles,
         emotion=emotion,
         session_id=session_id,
+    )
+
+
+@mcp.tool()
+async def organize(
+    message_ids: list[int] | None = None,
+    query: list[str] | None = None,
+    tags: list[str] | None = None,
+    speaker: str | None = None,
+    project: str | None = None,
+    topic_id: list[int] | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    emotion_filter: dict | None = None,
+    include_deleted: bool = False,
+    add_tags: list[str] | None = None,
+    remove_tags: list[str] | None = None,
+    limit: int = 100000,
+) -> dict:
+    """メッセージのタグ整理を行う。
+
+    検索条件またはID直接指定で対象メッセージを特定し、
+    タグの追加・削除を一括で行う。rememberからタグ付け責務を分離した専用コマンド。
+
+    Args:
+        message_ids: 対象メッセージIDの直接指定（検索条件との併用可）
+        query: 全文検索キーワード（AND検索）
+        tags: 既存タグでフィルタ（AND検索）
+        speaker: 発言者でフィルタ
+        project: プロジェクト名でフィルタ
+        topic_id: トピックIDでフィルタ（OR検索）
+        date_from: 日付範囲の開始（YYYY-MM-DD）
+        date_to: 日付範囲の終了（YYYY-MM-DD）
+        emotion_filter: 感情値のレンジフィルタ（例: {"joy": {"min": 10}, "anger": {"max": 50}}）
+        include_deleted: 論理削除済みも対象にする（デフォルト: false）
+        add_tags: 追加するタグ名の配列（未登録タグは自動作成）
+        remove_tags: 削除するタグ名の配列
+        limit: 処理件数上限（デフォルト: 100000）
+    """
+    return await organize_impl(
+        message_ids=message_ids,
+        query=query,
+        tags=tags,
+        speaker=speaker,
+        project=project,
+        topic_id=topic_id,
+        date_from=date_from,
+        date_to=date_to,
+        emotion_filter=emotion_filter,
+        include_deleted=include_deleted,
+        add_tags=add_tags,
+        remove_tags=remove_tags,
+        limit=limit,
     )
 
 

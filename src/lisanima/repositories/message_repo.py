@@ -69,6 +69,7 @@ async def searchMessages(
     emotion_filter: dict | None = None,
     limit: int = 20,
     offset: int = 0,
+    include_deleted: bool = False,
 ) -> dict:
     """t_messages テーブルからメッセージを検索する。
 
@@ -84,12 +85,15 @@ async def searchMessages(
         emotion_filter: 感情値レンジフィルタ
         limit: 取得件数上限
         offset: オフセット
+        include_deleted: 論理削除済みも含める（デフォルト: False）
 
     Returns:
         {"total": int, "messages": list[dict]}
     """
     # WHERE句の動的構築
-    conditions = ["m.is_deleted = FALSE"]
+    conditions: list[str] = []
+    if not include_deleted:
+        conditions.append("m.is_deleted = FALSE")
     params: list = []
 
     # query: 複数キーワードAND検索（各キーワードで部分一致）
@@ -146,7 +150,7 @@ async def searchMessages(
         conditions.append(f"t.name IN ({placeholders})")
         params.extend([t.lower().strip() for t in tags])
 
-    where_clause = " AND ".join(conditions)
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
     # タグのAND検索: HAVING COUNT で全タグ一致を保証
     group_by = ""
