@@ -59,12 +59,14 @@ async def insertMessage(
 
 async def searchMessages(
     conn: AsyncConnection,
-    query: str | None = None,
+    query: list[str] | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
+    project: str | None = None,
+    topic_id: list[int] | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    min_emotion: int | None = None,
+    emotion_filter: dict | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -72,12 +74,14 @@ async def searchMessages(
 
     Args:
         conn: DB接続
-        query: 全文検索キーワード
+        query: 全文検索キーワード（AND検索）
         tags: タグ名フィルタ（AND検索）
         speaker: 発言者フィルタ
+        project: プロジェクト名フィルタ
+        topic_id: トピックIDフィルタ（OR検索）
         date_from: 日付範囲開始（YYYY-MM-DD）
         date_to: 日付範囲終了（YYYY-MM-DD）
-        min_emotion: 最低感情値合計
+        emotion_filter: 感情値レンジフィルタ
         limit: 取得件数上限
         offset: オフセット
 
@@ -88,18 +92,38 @@ async def searchMessages(
     conditions = ["m.is_deleted = FALSE"]
     params: list = []
 
+    # query: 複数キーワードAND検索（各キーワードで pg_trgm % 演算子）
     if query:
-        # pg_trgm の % 演算子でGINインデックスを活用
-        conditions.append("m.content %% %s")
-        params.append(query)
+        for keyword in query:
+            conditions.append("m.content %% %s")
+            params.append(keyword)
 
     if speaker:
         conditions.append("m.speaker = %s")
         params.append(speaker)
 
-    if min_emotion is not None:
-        conditions.append("m.emotion_total >= %s")
-        params.append(min_emotion)
+    if project:
+        conditions.append("s.project = %s")
+        params.append(project)
+
+    # topic_id: OR検索（いずれかのトピックに紐づくセッション）
+    if topic_id:
+        conditions.append(
+            "m.session_id IN (SELECT session_id FROM t_session_topics WHERE topic_id = ANY(%s))"
+        )
+        params.append(topic_id)
+
+    # emotion_filter: 各軸ごとに min/max でレンジ条件
+    if emotion_filter:
+        for axis, range_spec in emotion_filter.items():
+            if not range_spec:
+                continue
+            if "min" in range_spec:
+                conditions.append(f"m.{axis} >= %s")
+                params.append(range_spec["min"])
+            if "max" in range_spec:
+                conditions.append(f"m.{axis} <= %s")
+                params.append(range_spec["max"])
 
     if date_from:
         conditions.append("s.date >= %s")
@@ -131,10 +155,10 @@ async def searchMessages(
         having = "HAVING COUNT(DISTINCT t.name) = %s"
         having_params = [len(tags)]
 
-    # ORDER BY: query指定時はpg_trgm類似度、それ以外は新しい順
+    # ORDER BY: query指定時はpg_trgm類似度（先頭キーワードで代表）、それ以外は新しい順
     if query:
         order_by = "ORDER BY similarity(m.content, %s) DESC, m.emotion_total DESC, m.created_at DESC"
-        order_params = [query]
+        order_params = [query[0]]
     else:
         order_by = "ORDER BY m.created_at DESC"
         order_params = []
@@ -163,7 +187,8 @@ async def searchMessages(
         data_sql = f"""
             SELECT m.id, s.date AS session_date, m.speaker, m.target,
                    m.content, m.joy, m.anger, m.sorrow, m.fun,
-                   m.emotion_total, m.created_at
+                   m.emotion_total, m.source, s.project,
+                   m.created_at
             FROM t_messages m
             JOIN t_sessions s ON m.session_id = s.id
             {tag_join}
@@ -201,6 +226,38 @@ async def searchMessages(
 
     logger.debug("メッセージ検索: total=%d, returned=%d", total, len(messages))
     return {"total": total, "messages": messages}
+
+
+async def softDelete(
+    conn: AsyncConnection,
+    message_id: int,
+    reason: str = "none",
+) -> dict | None:
+    """メッセージを論理削除する。
+
+    Args:
+        conn: DB接続
+        message_id: 削除対象のメッセージID
+        reason: 削除理由
+
+    Returns:
+        更新されたレコード。存在しない/既に削除済みの場合はNone
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE t_messages
+            SET is_deleted = TRUE, deleted_reason = %s
+            WHERE id = %s AND is_deleted = FALSE
+            RETURNING id
+            """,
+            (reason, message_id),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        logger.debug("メッセージ論理削除: id=%s, reason=%s", message_id, reason)
+        return dict(row)
 
 
 async def _getMessageTagsBatch(

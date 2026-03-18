@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from lisanima.db import db_pool
-from lisanima.repositories import session_repo, message_repo, tag_repo
+from lisanima.repositories import session_repo, message_repo, tag_repo, topic_repo
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ async def remember(
     speaker: str,
     target: str | None = None,
     emotion: dict | None = None,
+    topic_id: int | None = None,
     tags: list[str] | None = None,
     project: str | None = None,
     session_date: str | None = None,
@@ -74,6 +75,7 @@ async def remember(
         speaker: 発言者名
         target: 発言先
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
+        topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
         tags: タグ名の配列
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD
@@ -88,6 +90,14 @@ async def remember(
         target_date, _ = _validateParams(content, speaker, session_date, emotion)
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
+
+    # topic_id バリデーション
+    if topic_id is not None:
+        if not isinstance(topic_id, int) or topic_id <= 0:
+            return {
+                "error": "INVALID_PARAMETER",
+                "message": "topic_id は正の整数で指定してください",
+            }
 
     emo = emotion or {}
 
@@ -113,6 +123,15 @@ async def remember(
                     source=source,
                 )
 
+                # トピック紐付け
+                if topic_id is not None:
+                    topic = await topic_repo.getTopicById(conn, topic_id)
+                    if not topic:
+                        raise LookupError(
+                            f"指定されたトピックが見つかりません（id: {topic_id}）"
+                        )
+                    await topic_repo.linkSessionTopic(conn, session["id"], topic_id)
+
                 # タグ処理
                 tags_created = []
                 if tags:
@@ -133,6 +152,8 @@ async def remember(
             "status": "saved",
         }
 
+    except LookupError as e:
+        return {"error": "NOT_FOUND", "message": str(e)}
     except RuntimeError as e:
         logger.error("DB接続エラー: %s", e)
         return {"error": "DB_CONNECTION_ERROR", "message": str(e)}

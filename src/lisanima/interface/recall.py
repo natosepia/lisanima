@@ -7,12 +7,51 @@ from lisanima.repositories import message_repo
 
 logger = logging.getLogger(__name__)
 
+# emotion_filter で許可する感情軸
+_VALID_EMOTION_AXES = {"joy", "anger", "sorrow", "fun"}
+
+
+def _validateEmotionFilter(emotion_filter: dict) -> None:
+    """emotion_filter の構造を検証する。
+
+    Args:
+        emotion_filter: 感情レンジフィルタ
+
+    Raises:
+        ValueError: キーや値が不正な場合
+    """
+    for axis, range_spec in emotion_filter.items():
+        if axis not in _VALID_EMOTION_AXES:
+            raise ValueError(
+                f"emotion_filter のキーが不正です: '{axis}'（許可: {', '.join(sorted(_VALID_EMOTION_AXES))}）"
+            )
+        if not isinstance(range_spec, dict):
+            raise ValueError(f"emotion_filter['{axis}'] は辞書で指定してください")
+
+        for bound_key, bound_val in range_spec.items():
+            if bound_key not in ("min", "max"):
+                raise ValueError(
+                    f"emotion_filter['{axis}'] に不正なキー '{bound_key}'（許可: min, max）"
+                )
+            if not isinstance(bound_val, int) or bound_val < 0 or bound_val > 255:
+                raise ValueError(
+                    f"emotion_filter['{axis}']['{bound_key}'] は 0-255 の整数で指定してください: {bound_val}"
+                )
+
+        # min > max の矛盾チェック
+        if "min" in range_spec and "max" in range_spec:
+            if range_spec["min"] > range_spec["max"]:
+                raise ValueError(
+                    f"emotion_filter['{axis}'] の min({range_spec['min']}) が max({range_spec['max']}) より大きいです"
+                )
+
 
 def _validateParams(
     limit: int,
     offset: int,
     date_from: str | None,
     date_to: str | None,
+    emotion_filter: dict | None = None,
 ) -> tuple[date | None, date | None, str | None]:
     """入力パラメータを検証する。
 
@@ -21,6 +60,7 @@ def _validateParams(
         offset: オフセット
         date_from: 日付範囲開始
         date_to: 日付範囲終了
+        emotion_filter: 感情レンジフィルタ
 
     Returns:
         (parsed_date_from, parsed_date_to, エラーなしならNone)
@@ -54,28 +94,35 @@ def _validateParams(
             f"date_from({date_from}) が date_to({date_to}) より後になっています"
         )
 
+    if emotion_filter:
+        _validateEmotionFilter(emotion_filter)
+
     return parsed_from, parsed_to, None
 
 
 async def recall(
-    query: str | None = None,
+    query: list[str] | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
+    project: str | None = None,
+    topic_id: list[int] | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    min_emotion: int | None = None,
+    emotion_filter: dict | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
     """記憶を検索する。
 
     Args:
-        query: 全文検索キーワード
+        query: 全文検索キーワード（AND検索）
         tags: タグ名でフィルタ（AND検索）
         speaker: 発言者でフィルタ
+        project: プロジェクト名でフィルタ
+        topic_id: トピックIDでフィルタ（OR検索）
         date_from: 日付範囲の開始（YYYY-MM-DD）
         date_to: 日付範囲の終了（YYYY-MM-DD）
-        min_emotion: 感情値合計の下限
+        emotion_filter: 感情値のレンジフィルタ
         limit: 取得件数上限（デフォルト: 20）
         offset: オフセット（デフォルト: 0）
 
@@ -85,7 +132,7 @@ async def recall(
     """
     # バリデーション
     try:
-        _validateParams(limit, offset, date_from, date_to)
+        _validateParams(limit, offset, date_from, date_to, emotion_filter)
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
@@ -96,9 +143,11 @@ async def recall(
                 query=query,
                 tags=tags,
                 speaker=speaker,
+                project=project,
+                topic_id=topic_id,
                 date_from=date_from,
                 date_to=date_to,
-                min_emotion=min_emotion,
+                emotion_filter=emotion_filter,
                 limit=limit,
                 offset=offset,
             )

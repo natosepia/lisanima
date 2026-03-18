@@ -16,8 +16,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from lisanima.db import db_pool
-from lisanima.interface.remember import remember as remember_impl
+from lisanima.interface.forget import forget as forget_impl
 from lisanima.interface.recall import recall as recall_impl
+from lisanima.interface.remember import remember as remember_impl
+from lisanima.interface.rulebook import rulebook as rulebook_impl
+from lisanima.interface.topics import topicManage as topic_manage_impl
 
 # stdoutはMCPプロトコル通信に使うため、loggingはstderrに出す
 logging.basicConfig(
@@ -140,6 +143,7 @@ async def remember(
     speaker: str,
     target: str | None = None,
     emotion: dict | None = None,
+    topic_id: int | None = None,
     tags: list[str] | None = None,
     project: str | None = None,
     session_date: str | None = None,
@@ -154,6 +158,7 @@ async def remember(
         speaker: 発言者名（リサ / なとせ / ありす / 桃華 / ほたる / 晶葉）
         target: 発言先（省略時はbroadcast）
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
+        topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
         tags: タグ名の配列（連想記憶用）
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD（省略時は今日）
@@ -163,6 +168,7 @@ async def remember(
         speaker=speaker,
         target=target,
         emotion=emotion,
+        topic_id=topic_id,
         tags=tags,
         project=project,
         session_date=session_date,
@@ -171,12 +177,14 @@ async def remember(
 
 @mcp.tool()
 async def recall(
-    query: str | None = None,
+    query: list[str] | None = None,
     tags: list[str] | None = None,
     speaker: str | None = None,
+    project: str | None = None,
+    topic_id: list[int] | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    min_emotion: int | None = None,
+    emotion_filter: dict | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -186,12 +194,14 @@ async def recall(
     全パラメータ省略時は最新20件を返却。
 
     Args:
-        query: 全文検索キーワード
+        query: 全文検索キーワード（AND検索）
         tags: タグ名でフィルタ（AND検索）
         speaker: 発言者でフィルタ
+        project: プロジェクト名でフィルタ
+        topic_id: トピックIDでフィルタ（OR検索）
         date_from: 日付範囲の開始（YYYY-MM-DD）
         date_to: 日付範囲の終了（YYYY-MM-DD）
-        min_emotion: 感情値合計の下限
+        emotion_filter: 感情値のレンジフィルタ（例: {"joy": {"min": 10}, "anger": {"max": 50}}）
         limit: 取得件数上限（デフォルト: 20）
         offset: オフセット（デフォルト: 0）
     """
@@ -199,11 +209,93 @@ async def recall(
         query=query,
         tags=tags,
         speaker=speaker,
+        project=project,
+        topic_id=topic_id,
         date_from=date_from,
         date_to=date_to,
-        min_emotion=min_emotion,
+        emotion_filter=emotion_filter,
         limit=limit,
         offset=offset,
+    )
+
+
+@mcp.tool()
+async def forget(
+    message_id: int,
+    reason: str | None = None,
+) -> dict:
+    """記憶を論理削除する。
+
+    指定した記憶を論理削除する。物理削除は行わない。
+    recall の検索結果からは除外される。
+
+    Args:
+        message_id: 削除対象のメッセージID
+        reason: 削除理由
+    """
+    return await forget_impl(
+        message_id=message_id,
+        reason=reason,
+    )
+
+
+@mcp.tool()
+async def topic_manage(
+    action: str,
+    topic_id: int | None = None,
+    name: str | None = None,
+    roles: list[str] | None = None,
+    emotion: dict | None = None,
+    session_id: int | None = None,
+) -> dict:
+    """トピック（議題）のCRUD操作を行う。
+
+    トピックの作成・クローズ・再開・更新を行う。
+
+    Args:
+        action: "create" / "close" / "reopen" / "update"
+        topic_id: トピックID（close/reopen/update時必須）
+        name: トピック名（create時必須）
+        roles: 役割名の配列（sparring, support, review, study, casual等）
+        emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
+        session_id: セッションIDとの紐付け
+    """
+    return await topic_manage_impl(
+        action=action,
+        topic_id=topic_id,
+        name=name,
+        roles=roles,
+        emotion=emotion,
+        session_id=session_id,
+    )
+
+
+@mcp.tool()
+async def rulebook(
+    action: str,
+    key: str | None = None,
+    content: str | None = None,
+    reason: str | None = None,
+    persona_id: str | None = None,
+) -> dict:
+    """ルールブックの参照・設定・廃止を行う。
+
+    イミュータブル追記型で、バージョン管理される。
+    最新かつ有効なルールのみを取得する。
+
+    Args:
+        action: "get" / "set" / "retire" / "list"
+        key: ルールキー（例: "persona.tone", "format.code_review"）
+        content: ルール本文（set時必須、Markdown）
+        reason: 変更理由
+        persona_id: ペルソナID（省略時は全ペルソナ共通 '*'）
+    """
+    return await rulebook_impl(
+        action=action,
+        key=key,
+        content=content,
+        reason=reason,
+        persona_id=persona_id,
     )
 
 
