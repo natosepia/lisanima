@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from lisanima.db import db_pool
-from lisanima.repositories import session_repo, message_repo, tag_repo, topic_repo
+from lisanima.repositories import session_repo, message_repo, topic_repo
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ async def remember(
     target: str | None = None,
     emotion: dict | None = None,
     topic_id: int | None = None,
-    tags: list[str] | None = None,
     project: str | None = None,
     session_date: str | None = None,
     source: str = "unknown",
@@ -76,13 +75,12 @@ async def remember(
         target: 発言先
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
         topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
-        tags: タグ名の配列
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD
         source: MCPクライアント識別子
 
     Returns:
-        {"message_id": int, "session_id": int, "tags_created": list, "status": "saved"}
+        {"message_id": int, "session_id": int, "status": "saved"}
         エラー時は {"error": "ERROR_CODE", "message": "エラーメッセージ"}
     """
     # バリデーション
@@ -132,14 +130,6 @@ async def remember(
                         )
                     await topic_repo.linkSessionTopic(conn, session["id"], topic_id)
 
-                # タグ処理
-                tags_created = []
-                if tags:
-                    tag_records = await tag_repo.findOrCreateTags(conn, tags)
-                    tag_ids = [t["id"] for t in tag_records]
-                    await tag_repo.linkMessageTags(conn, message["id"], tag_ids)
-                    tags_created = [t["name"] for t in tag_records]
-
         logger.debug(
             "remember完了: message_id=%s, session_id=%s",
             message["id"], session["id"],
@@ -148,7 +138,6 @@ async def remember(
         return {
             "message_id": message["id"],
             "session_id": session["id"],
-            "tags_created": tags_created,
             "status": "saved",
         }
 

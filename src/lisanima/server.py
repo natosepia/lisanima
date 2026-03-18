@@ -145,7 +145,6 @@ async def remember(
     target: str | None = None,
     emotion: dict | None = None,
     topic_id: int | None = None,
-    tags: list[str] | None = None,
     project: str | None = None,
     session_date: str | None = None,
 ) -> dict:
@@ -153,6 +152,7 @@ async def remember(
 
     セッション中の発言・知見をDBに永続化する。
     セッションは日付単位で自動管理される。
+    タグ付けは organize コマンドで行う。
 
     Args:
         content: 発言・記憶の内容
@@ -160,7 +160,6 @@ async def remember(
         target: 発言先（省略時はbroadcast）
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
         topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
-        tags: タグ名の配列（連想記憶用）
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD（省略時は今日）
     """
@@ -170,7 +169,6 @@ async def remember(
         target=target,
         emotion=emotion,
         topic_id=topic_id,
-        tags=tags,
         project=project,
         session_date=session_date,
     )
