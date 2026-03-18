@@ -92,11 +92,13 @@ async def searchMessages(
     conditions = ["m.is_deleted = FALSE"]
     params: list = []
 
-    # query: 複数キーワードAND検索（各キーワードで pg_trgm % 演算子）
+    # query: 複数キーワードAND検索（各キーワードで部分一致）
+    # pg_trgm の % 演算子は日本語短文で similarity が極端に低くなるため LIKE に変更。
+    # ORDER BY で similarity() を使い関連度ソートは維持する。
     if query:
         for keyword in query:
-            conditions.append("m.content %% %s")
-            params.append(keyword)
+            conditions.append("m.content LIKE %s")
+            params.append(f"%{keyword}%")
 
     if speaker:
         conditions.append("m.speaker = %s")
@@ -151,7 +153,7 @@ async def searchMessages(
     having = ""
     having_params: list = []
     if tags:
-        group_by = "GROUP BY m.id, s.date"
+        group_by = "GROUP BY m.id, s.id"
         having = "HAVING COUNT(DISTINCT t.name) = %s"
         having_params = [len(tags)]
 
@@ -164,10 +166,6 @@ async def searchMessages(
         order_params = []
 
     async with conn.cursor() as cur:
-        # 日本語の短いクエリ向けにsimilarity閾値を下げる
-        if query:
-            await cur.execute("SET pg_trgm.similarity_threshold = 0.1")
-
         # 件数取得
         count_sql = f"""
             SELECT COUNT(*) FROM (
