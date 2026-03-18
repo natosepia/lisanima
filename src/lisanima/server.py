@@ -11,7 +11,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -138,10 +138,22 @@ if _args.http:
 # MCPツール登録
 # ----------------------------------------------------------
 
+def _getSource(ctx: Context) -> str:
+    """MCPコンテキストから接続元クライアント名を取得する。"""
+    try:
+        params = ctx.session.client_params
+        if params and params.clientInfo:
+            return params.clientInfo.name
+    except Exception:
+        pass
+    return "unknown"
+
+
 @mcp.tool()
 async def remember(
     content: str,
     speaker: str,
+    ctx: Context,
     target: str | None = None,
     emotion: dict | None = None,
     topic_id: int | None = None,
@@ -171,6 +183,7 @@ async def remember(
         topic_id=topic_id,
         project=project,
         session_date=session_date,
+        source=_getSource(ctx),
     )
 
 
