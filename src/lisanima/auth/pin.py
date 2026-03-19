@@ -180,7 +180,8 @@ async def handlePinPost(request: Request) -> Response:
     # PIN検証
     if not _verifyPin(pin):
         _recordFailure()
-        logger.warning("PIN認証失敗: ip=%s", request.client.host)
+        client_ip = request.client.host if request.client else "unknown"
+        logger.warning("PIN認証失敗: ip=%s", client_ip)
         remaining = _MAX_FAILURES - _failure_count
         error_msg = f"PINが正しくありません（残り{remaining}回）" if remaining > 0 else "ロックアウトされました。しばらくお待ちください。"
         template = _loadTemplate()

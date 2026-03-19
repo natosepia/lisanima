@@ -90,6 +90,10 @@ async def searchMessages(
     Returns:
         {"total": int, "messages": list[dict]}
     """
+    # パラメータの型を保証（MCP経由で非int値が渡される場合の防御）
+    limit = int(limit)
+    offset = int(offset)
+
     # WHERE句の動的構築
     conditions: list[str] = []
     if not include_deleted:
@@ -101,8 +105,10 @@ async def searchMessages(
     # ORDER BY で similarity() を使い関連度ソートは維持する。
     if query:
         for keyword in query:
-            conditions.append("m.content LIKE %s")
-            params.append(f"%{keyword}%")
+            # LIKE特殊文字（%, _, \）をエスケープしてからワイルドカードで囲む
+            escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions.append("m.content LIKE %s ESCAPE '\\'")
+            params.append(f"%{escaped}%")
 
     if speaker:
         conditions.append("m.speaker = %s")
@@ -184,6 +190,10 @@ async def searchMessages(
         """
         await cur.execute(count_sql, params + having_params)
         total = (await cur.fetchone())["count"]
+
+        # offsetがtotal以上なら空結果を早期リターン（不要なクエリを回避）
+        if offset >= total and total > 0:
+            return {"total": total, "messages": []}
 
         # データ取得
         data_sql = f"""
