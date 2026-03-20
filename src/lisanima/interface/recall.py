@@ -4,46 +4,9 @@ from datetime import date
 
 from lisanima.db import db_pool
 from lisanima.repositories import message_repo
+from lisanima.repositories._validators import parseDateRange, validateEmotionFilter
 
 logger = logging.getLogger(__name__)
-
-# emotion_filter で許可する感情軸
-_VALID_EMOTION_AXES = {"joy", "anger", "sorrow", "fun"}
-
-
-def _validateEmotionFilter(emotion_filter: dict) -> None:
-    """emotion_filter の構造を検証する。
-
-    Args:
-        emotion_filter: 感情レンジフィルタ
-
-    Raises:
-        ValueError: キーや値が不正な場合
-    """
-    for axis, range_spec in emotion_filter.items():
-        if axis not in _VALID_EMOTION_AXES:
-            raise ValueError(
-                f"emotion_filter のキーが不正です: '{axis}'（許可: {', '.join(sorted(_VALID_EMOTION_AXES))}）"
-            )
-        if not isinstance(range_spec, dict):
-            raise ValueError(f"emotion_filter['{axis}'] は辞書で指定してください")
-
-        for bound_key, bound_val in range_spec.items():
-            if bound_key not in ("min", "max"):
-                raise ValueError(
-                    f"emotion_filter['{axis}'] に不正なキー '{bound_key}'（許可: min, max）"
-                )
-            if not isinstance(bound_val, int) or bound_val < 0 or bound_val > 255:
-                raise ValueError(
-                    f"emotion_filter['{axis}']['{bound_key}'] は 0-255 の整数で指定してください: {bound_val}"
-                )
-
-        # min > max の矛盾チェック
-        if "min" in range_spec and "max" in range_spec:
-            if range_spec["min"] > range_spec["max"]:
-                raise ValueError(
-                    f"emotion_filter['{axis}'] の min({range_spec['min']}) が max({range_spec['max']}) より大きいです"
-                )
 
 
 def _validateParams(
@@ -74,28 +37,8 @@ def _validateParams(
     if offset < 0:
         raise ValueError("offset は 0 以上で指定してください")
 
-    parsed_from = None
-    parsed_to = None
-
-    if date_from:
-        try:
-            parsed_from = date.fromisoformat(date_from)
-        except ValueError:
-            raise ValueError(f"date_from の形式が不正です（YYYY-MM-DD）: {date_from}")
-
-    if date_to:
-        try:
-            parsed_to = date.fromisoformat(date_to)
-        except ValueError:
-            raise ValueError(f"date_to の形式が不正です（YYYY-MM-DD）: {date_to}")
-
-    if parsed_from and parsed_to and parsed_from > parsed_to:
-        raise ValueError(
-            f"date_from({date_from}) が date_to({date_to}) より後になっています"
-        )
-
-    if emotion_filter:
-        _validateEmotionFilter(emotion_filter)
+    parsed_from, parsed_to = parseDateRange(date_from, date_to)
+    validateEmotionFilter(emotion_filter)
 
     return parsed_from, parsed_to, None
 

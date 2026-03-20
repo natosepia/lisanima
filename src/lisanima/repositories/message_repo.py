@@ -6,6 +6,8 @@ import logging
 
 from psycopg import AsyncConnection, sql
 
+from lisanima.repositories._validators import VALID_EMOTION_AXES
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,11 @@ async def insertMessage(
     Returns:
         保存したメッセージのdict
     """
+    # 感情値の値域チェック（0-255の整数）
+    for axis_name, axis_val in [("joy", joy), ("anger", anger), ("sorrow", sorrow), ("fun", fun)]:
+        if not isinstance(axis_val, int) or not (0 <= axis_val <= 255):
+            raise ValueError(f"{axis_name} は 0〜255 の整数で指定してください: {axis_val}")
+
     # targetがNoneの場合はDBデフォルトに合わせて'*'を設定
     if target is None:
         target = "*"
@@ -94,6 +101,12 @@ async def searchMessages(
     limit = int(limit)
     offset = int(offset)
 
+    # limit / offset の値域チェック
+    if limit < 1:
+        raise ValueError("limit は 1 以上で指定してください")
+    if offset < 0:
+        raise ValueError("offset は 0 以上で指定してください")
+
     # WHERE句の動的構築
     conditions: list[str] = []
     if not include_deleted:
@@ -128,6 +141,9 @@ async def searchMessages(
     # emotion_filter: 各軸ごとに min/max でレンジ条件
     if emotion_filter:
         for axis, range_spec in emotion_filter.items():
+            # 感情軸名をホワイトリスト検証（SQL識別子として使用するため）
+            if axis not in VALID_EMOTION_AXES:
+                raise ValueError(f"不正な感情軸: '{axis}'")
             if not range_spec:
                 continue
             if "min" in range_spec:

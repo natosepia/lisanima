@@ -6,6 +6,8 @@ import logging
 
 from psycopg import AsyncConnection
 
+from lisanima.repositories._validators import validateEmotion
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,6 +176,9 @@ async def createTopic(
     Returns:
         作成したトピックのdict（roles含む）
     """
+    # 感情値のキー・値域チェック
+    validateEmotion(emotion)
+
     em = emotion or {}
     joy = em.get("joy", 0)
     anger = em.get("anger", 0)
@@ -313,6 +318,9 @@ async def updateTopic(
     Returns:
         更新後のトピックdict（roles含む）、未検出の場合はNone
     """
+    # 感情値のキー・値域チェック
+    validateEmotion(emotion)
+
     # SET句の動的構築
     set_clauses: list[str] = []
     params: list = []

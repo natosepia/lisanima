@@ -32,31 +32,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _parseArgs() -> argparse.Namespace:
-    """コマンドライン引数をパースする。
-
-    Returns:
-        パース済みの引数Namespace
-    """
-    parser = argparse.ArgumentParser(description="lisanima MCPサーバー")
-    parser.add_argument(
-        "--http",
-        action="store_true",
-        help="Streamable HTTPモードで起動する（デフォルトはstdio）",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="HTTPモード時のリッスンポート（デフォルト: 8765）",
-    )
-    return parser.parse_args()
-
-
-# 起動モード判定（モジュール読み込み時にFastMCPインスタンスを構築するため先に判定）
-_args = _parseArgs()
-
-
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[None]:
     """サーバーのライフサイクル管理。
@@ -72,13 +47,14 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
         logger.info("lisanima MCPサーバー終了")
 
 
-def _createMcp() -> FastMCP:
+def _createMcp(http_mode: bool = False) -> FastMCP:
     """FastMCPインスタンスを生成する。
 
-    HTTPモード時はOAuth 2.1認証を有効にする。
-    stdioモード時は認証なし（ローカル通信のため不要）。
+    Args:
+        http_mode: TrueならOAuth 2.1認証を有効にしたHTTPモード用インスタンスを返す。
+                   Falseならstdioモード用（認証なし）。
     """
-    if _args.http:
+    if http_mode:
         from mcp.server.auth.settings import (
             AuthSettings,
             ClientRegistrationOptions,
@@ -117,21 +93,9 @@ def _createMcp() -> FastMCP:
     return server
 
 
+# stdioモードのデフォルトインスタンス。ツール登録デコレータが参照する。
+# HTTPモード時は main() で再構築して差し替える。
 mcp = _createMcp()
-
-
-# ----------------------------------------------------------
-# /auth/pin カスタムルート（OAuth認証なしで公開）
-# ----------------------------------------------------------
-if _args.http:
-    from lisanima.auth.pin import handlePinGet, handlePinPost
-
-    @mcp.custom_route("/auth/pin", methods=["GET", "POST"])
-    async def pin_handler(request: Request) -> Response:
-        """PIN認証画面（GET: フォーム表示, POST: PIN検証）。"""
-        if request.method == "GET":
-            return await handlePinGet(request)
-        return await handlePinPost(request)
 
 
 # ----------------------------------------------------------
@@ -364,6 +328,42 @@ async def rulebook(
     )
 
 
+def _registerPinRoute(server: FastMCP) -> None:
+    """OAuth PIN認証用のカスタムルートを登録する。
+
+    HTTPモード時のみ呼び出される。
+    custom_routeデコレータで /auth/pin を認証スキップで公開する。
+
+    Args:
+        server: カスタムルートを登録するFastMCPインスタンス
+    """
+    from lisanima.auth.pin import handlePinGet, handlePinPost
+
+    @server.custom_route("/auth/pin", methods=["GET", "POST"])
+    async def pin_handler(request: Request) -> Response:
+        """PIN認証画面（GET: フォーム表示, POST: PIN検証）。"""
+        if request.method == "GET":
+            return await handlePinGet(request)
+        return await handlePinPost(request)
+
+
+def _reregisterTools(server: FastMCP) -> None:
+    """モジュールレベルで登録済みのツールを新しいサーバーインスタンスに移植する。
+
+    mcp変数を差し替えた際、旧インスタンスに登録されたツール定義を
+    新インスタンスにコピーする。
+
+    Note:
+        FastMCPの内部API（_tool_manager._tools）に依存している。
+        FastMCPのバージョンアップ時に構造変更の可能性があるため要確認。
+
+    Args:
+        server: ツールを移植する先のFastMCPインスタンス
+    """
+    for name, tool in mcp._tool_manager._tools.items():
+        server._tool_manager._tools[name] = tool
+
+
 def main():
     """MCPサーバーを起動する。
 
@@ -371,10 +371,32 @@ def main():
     --http: Streamable HTTPモード（リモートDesktop App用）
     --port: HTTPモード時のポート指定（デフォルト: 8765）
     """
-    if _args.http:
+    global mcp
+
+    parser = argparse.ArgumentParser(description="lisanima MCPサーバー")
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help="Streamable HTTPモードで起動する（デフォルトはstdio）",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="HTTPモード時のリッスンポート（デフォルト: 8765）",
+    )
+    args = parser.parse_args()
+
+    if args.http:
+        # OAuth付きインスタンスに差し替え、ツール定義を移植する
+        http_mcp = _createMcp(http_mode=True)
+        _reregisterTools(http_mcp)
+        _registerPinRoute(http_mcp)
+        mcp = http_mcp
+
         mcp.settings.host = "127.0.0.1"
-        mcp.settings.port = _args.port
-        logger.info("Streamable HTTPモードで起動 (port=%d)", _args.port)
+        mcp.settings.port = args.port
+        logger.info("Streamable HTTPモードで起動 (port=%d)", args.port)
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")

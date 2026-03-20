@@ -3,35 +3,12 @@ import logging
 
 from lisanima.db import db_pool
 from lisanima.repositories import topic_repo
+from lisanima.repositories._validators import validateEmotion
 
 logger = logging.getLogger(__name__)
 
 # 許可するアクション
 _VALID_ACTIONS = {"create", "close", "reopen", "update"}
-
-# 感情値として許可するキー
-_VALID_EMOTION_KEYS = {"joy", "anger", "sorrow", "fun"}
-
-
-def _validateEmotion(emotion: dict | None) -> None:
-    """感情値辞書を検証する。
-
-    Args:
-        emotion: 感情値辞書
-
-    Raises:
-        ValueError: 不正なキーまたは値の場合
-    """
-    if not emotion:
-        return
-
-    invalid_keys = set(emotion.keys()) - _VALID_EMOTION_KEYS
-    if invalid_keys:
-        raise ValueError(f"emotion に不正なキーがあります: {invalid_keys}")
-
-    for key, val in emotion.items():
-        if not isinstance(val, int) or not (0 <= val <= 255):
-            raise ValueError(f"emotion.{key} は 0〜255 の整数で指定してください: {val}")
 
 
 def _validateParams(
@@ -62,7 +39,7 @@ def _validateParams(
         if topic_id is None:
             raise ValueError(f"{action} 時は topic_id が必須です")
 
-    _validateEmotion(emotion)
+    validateEmotion(emotion)
 
 
 async def topicManage(

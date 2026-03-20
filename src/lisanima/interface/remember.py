@@ -4,11 +4,9 @@ from datetime import date
 
 from lisanima.db import db_pool
 from lisanima.repositories import session_repo, message_repo, topic_repo
+from lisanima.repositories._validators import validateEmotion
 
 logger = logging.getLogger(__name__)
-
-# 感情値として許可するキー
-_VALID_EMOTION_KEYS = {"joy", "anger", "sorrow", "fun"}
 
 
 def _validateParams(
@@ -46,13 +44,7 @@ def _validateParams(
             raise ValueError(f"session_date の形式が不正です（YYYY-MM-DD）: {session_date}")
 
     # 感情値バリデーション
-    if emotion:
-        invalid_keys = set(emotion.keys()) - _VALID_EMOTION_KEYS
-        if invalid_keys:
-            raise ValueError(f"emotion に不正なキーがあります: {invalid_keys}")
-        for key, val in emotion.items():
-            if not isinstance(val, int) or not (0 <= val <= 255):
-                raise ValueError(f"emotion.{key} は 0〜255 の整数で指定してください: {val}")
+    validateEmotion(emotion)
 
     return target_date, None
 
