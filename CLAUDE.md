@@ -42,3 +42,15 @@
 | ComputerScienceTech | TCP/IP、OAuth、アルゴリズム等の技術知見 |
 | General | 雑多な議論・相談 |
 | Q&A | 技術的な質問 |
+
+### ツール
+#### SQL実行
+utils/sql_executor.py を使う。使い方は下記の通り<br>
+
+##### SQLファイルを読み込んで実行
+> python utils/sql_executor.py file sql/ins_tbl_m_rulebooks.sql
+
+
+##### 任意SQL実行
+> python utils/sql_executor.py exec "SELECT * FROM m_rulebooks WHERE level = 5;"
+

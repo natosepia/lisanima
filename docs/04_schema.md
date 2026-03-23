@@ -112,19 +112,20 @@ erDiagram
 
 ```mermaid
 erDiagram
-    t_rulebooks {
-        int id PK
-        text key
+    m_rulebooks {
+        text path PK
+        int version PK
+        smallint level
         text content
-        int version
         text reason
         bool is_retired
+        bool is_editable
         text persona_id
         timestamptz created_at
     }
 ```
 
-> **v_active_rulebooks (VIEW)**: key単位で最新バージョンを取得し、そのレコードが有効（`is_retired = FALSE`）な場合のみ返すビュー。最新バージョンがretiredなら結果に含まれない。詳細はセクション3.10参照。
+> **v_active_rulebooks (VIEW)**: path単位で最新バージョンを取得し、そのレコードが有効（`is_retired = FALSE`）な場合のみ返すビュー。最新バージョンがretiredなら結果に含まれない。詳細はセクション3.10参照。
 
 ### OAuth 2.1
 
@@ -358,38 +359,64 @@ t_topics と m_role の N:N 中間テーブル。
 **制約:**
 - `PRIMARY KEY(topic_id, role_id)`
 
-### 3.9 t_rulebooks（ルールブック）
+### 3.9 m_rulebooks（ルールブック）
 
-イミュータブル追記型のルール管理テーブル。バージョン管理により変更履歴を保持する。
+Materialized Path構造のイミュータブル追記型ルール管理テーブル。階層構造でルールを管理し、バージョン管理により変更履歴を保持する。
 
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
-| id | INTEGER | PK, GENERATED ALWAYS AS IDENTITY | ルールブックID |
-| key | TEXT | NOT NULL | ルールキー（プレフィックスで分類: persona.*/format.*/workflow.*） |
-| content | TEXT | NOT NULL | ルール本文（Markdown） |
-| version | INTEGER | NOT NULL, DEFAULT 1 | バージョン番号 |
-| reason | TEXT | NOT NULL, DEFAULT 'none' | 変更理由 |
+| path | TEXT | PK（複合）, NOT NULL | Materialized Path（例: '1.2.3'） |
+| version | INTEGER | PK（複合）, NOT NULL, DEFAULT 1 | バージョン番号 |
+| level | SMALLINT | NOT NULL, CHECK (1-5) | 階層レベル（Lv1:章 > Lv2:節 > Lv3:項 > Lv4:号 > Lv5:細則） |
+| content | TEXT | NOT NULL | Lv1-3: タイトル、Lv4-5: ルール本文 |
+| reason | TEXT | NULLABLE | 変更理由 |
 | is_retired | BOOLEAN | NOT NULL, DEFAULT FALSE | 廃止フラグ |
-| persona_id | TEXT | NOT NULL, DEFAULT '*' | ペルソナID（'*' は全ペルソナ共通ルール） |
+| is_editable | BOOLEAN | NOT NULL, DEFAULT TRUE | 編集権限（FALSE=constitutional、なとせのみ管理） |
+| persona_id | TEXT | NULLABLE | ペルソナID（末端レベルのみ使用、上位はNULL、'*'は全ペルソナ共通） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
 **制約:**
-- `UNIQUE(key, persona_id, version)`
+- `PRIMARY KEY(path, version)`
+- `CHECK(level BETWEEN 1 AND 5)`
 
-**設計判断:**
-- イミュータブル追記型: UPDATEせず新バージョンをINSERTする。変更履歴が自動的に残る
-- keyのプレフィックス: `persona.*`（人格関連）、`format.*`（出力形式）、`workflow.*`（作業手順）で分類
-- persona_id: '*' は全ペルソナ共通ルール、値ありは特定ペルソナ専用ルール
-- 将来 m_persona マスタ作成時にFK化予定
+**設計パターン: Materialized Path（経路列挙）**
+- `ORDER BY path` で階層順に一発ソート
+- `WHERE path LIKE '1.2.%'` でサブツリー取得が可能
+- PKが `(path, version)` のためpath前方一致はPKインデックスで効く
+
+**階層体系（法令の章>節>項>号に対応）:**
+- Lv1: 大分類（グローバル / パーソナライズ / プロトコル）
+- Lv2: 中分類（基本情報 / 設計哲学 / コーディング規約 等）
+- Lv3: 小分類（原則 / 命名・書式 等）
+- Lv4: ルール本文（具体的な指示・規則）
+- Lv5: 細則（Lv4の具体的手順・箇条書き項目）
+
+**権限制御:**
+- `is_editable = FALSE`: constitutionalルール。なとせがpsql or マイグレーションで管理。MCPのrulebookコマンドからは変更不可
+- `is_editable = TRUE`: operational/tacticalルール。リサがMCPコマンド経由で読み書き可
+- rulebookコマンドの set/retire 時に `WHERE is_editable = TRUE` を条件付与
+
+**persona_id の値:**
+
+| 値 | 意味 | 使用例 |
+|----|------|--------|
+| NULL | 該当なし | Lv1-3の見出し行（ペルソナに紐づかない構造要素） |
+| `*` | 全ペルソナ共通 | 設計哲学、コーディング規約など全員が従うルール |
+| `リサ` | リサ専用 | 口調、役割定義などリサ固有のルール |
+
+**旧設計との差分:**
+- 旧 t_rulebooks（key + id方式）から m_rulebooks（Materialized Path方式）に全面改訂
+- サロゲートキー(id)廃止 → ナチュラルキー(path + version)
+- t_constitution別テーブル案 → 同一テーブル + is_editableフラグに統合
 
 ### 3.10 v_active_rulebooks（ビュー）
 
 最新かつ有効なルールのみを返すビュー。
 
 **仕様:**
-- key + persona_id 単位で最新バージョン（MAX(version)）を取得し、そのレコードが `is_retired = FALSE` の場合のみ返す
-- 最新バージョンがretiredなら、そのkeyは結果に含まれない（旧バージョンが復活することはない）
-- retireされたkeyを再度有効にするには、新バージョンをINSERTする（rulebookコマンドのset操作）
+- path単位で最新バージョン（MAX(version)）を取得し、そのレコードが `is_retired = FALSE` の場合のみ返す
+- 最新バージョンがretiredなら、そのpathは結果に含まれない（旧バージョンが復活することはない）
+- retireされたpathを再度有効にするには、新バージョンをINSERTする（rulebookコマンドのset操作）
 
 **DDL**: [server.py](../src/lisanima/server.py) または セクション7のDDLを参照
 
@@ -523,7 +550,7 @@ CREATE INDEX idx_t_sessions_date ON t_sessions (date);
 CREATE INDEX idx_t_tags_name_trgm ON t_tags USING gin (name gin_trgm_ops);
 ```
 
-### トピック・ルールブックテーブル
+### トピックテーブル
 
 ```sql
 -- t_topics
@@ -531,6 +558,8 @@ CREATE INDEX idx_t_topics_status ON t_topics (status);
 CREATE INDEX idx_t_topics_name_trgm ON t_topics USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_emotion_total ON t_topics (emotion_total);
 ```
+
+> **m_rulebooks**: PKが `(path, version)` のため、path前方一致検索はPKインデックスで効く。追加インデックス不要。
 
 ### OAuth用
 
@@ -650,29 +679,30 @@ CREATE TABLE t_topic_roles (
     PRIMARY KEY (topic_id, role_id)
 );
 
--- ルールブック（イミュータブル追記型）
-CREATE TABLE t_rulebooks (
-    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    key         TEXT NOT NULL,
-    content     TEXT NOT NULL,
+-- ルールブック（Materialized Path + イミュータブル追記型）
+CREATE TABLE m_rulebooks (
+    path        TEXT NOT NULL,
     version     INTEGER NOT NULL DEFAULT 1,
-    reason      TEXT NOT NULL DEFAULT 'none',
+    level       SMALLINT NOT NULL CONSTRAINT m_rulebooks_level_chk
+                    CHECK (level BETWEEN 1 AND 4),
+    content     TEXT NOT NULL,
+    reason      TEXT,
     is_retired  BOOLEAN NOT NULL DEFAULT FALSE,
-    persona_id  TEXT NOT NULL DEFAULT '*',
+    is_editable BOOLEAN NOT NULL DEFAULT TRUE,
+    persona_id  TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(key, persona_id, version)
+    CONSTRAINT m_rulebooks_pk PRIMARY KEY (path, version)
 );
 
 -- 最新かつ有効なルールのみを返すビュー
 CREATE VIEW v_active_rulebooks AS
 SELECT r.*
-FROM t_rulebooks r
+FROM m_rulebooks r
 INNER JOIN (
-    SELECT key, persona_id, MAX(version) AS max_version
-    FROM t_rulebooks
-    GROUP BY key, persona_id
-) latest ON r.key = latest.key
-    AND r.persona_id = latest.persona_id
+    SELECT path, MAX(version) AS max_version
+    FROM m_rulebooks
+    GROUP BY path
+) latest ON r.path = latest.path
     AND r.version = latest.max_version
 WHERE r.is_retired = FALSE;
 
@@ -744,10 +774,12 @@ CREATE INDEX idx_t_messages_emotion_total ON t_messages (emotion_total);
 CREATE INDEX idx_t_sessions_date ON t_sessions (date);
 CREATE INDEX idx_t_tags_name_trgm ON t_tags USING gin (name gin_trgm_ops);
 
--- トピック・ルールブックテーブル
+-- トピックテーブル
 CREATE INDEX idx_t_topics_status ON t_topics (status);
 CREATE INDEX idx_t_topics_name_trgm ON t_topics USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_emotion_total ON t_topics (emotion_total);
+
+-- m_rulebooks: PK(path, version)がインデックスとして機能するため追加不要
 
 -- OAuth用
 CREATE INDEX idx_t_oauth_access_token_expires ON t_oauth_access_token (expires_at);
