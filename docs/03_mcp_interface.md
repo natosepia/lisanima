@@ -388,7 +388,7 @@ recallは「記憶を読む」ためのコマンド、organizeは「記憶を整
 | t_session_topics | 新設 | remember, recall, topic_manage | 新規 |
 | m_role | 新設 | topic_manage | 新規 |
 | t_topic_roles | 新設 | topic_manage | 新規 |
-| t_rulebooks | 新設 | rulebook | 新規 |
+| m_rulebooks | 新設 | rulebook | 新規 |
 | v_active_rulebooks | 新設（ビュー） | rulebook | 新規 |
 | m_category | 廃止 | - | **どのコマンドからも参照されないことが外部設計から証明** |
 

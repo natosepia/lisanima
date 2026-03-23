@@ -255,7 +255,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | トリガー | リサがMCPツール `rulebook` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること |
 | 事後条件 | action=get: ルールが返却される。action=set: 新バージョンのルールが保存される。action=retire: ルールが廃止される。action=list: 有効なルール一覧が返却される |
-| 基本フロー | 1. リサが `rulebook` を呼び出す（action, key, content, reason, persona_id）<br>2. action別に処理:<br>  - get: v_active_rulebooksから指定keyの最新有効ルールを取得<br>  - set: t_rulebooksに新バージョンをINSERT（既存keyならversion+1）<br>  - retire: 指定keyの最新版をis_retired=TRUEに更新<br>  - list: v_active_rulebooksから一覧取得（persona_idフィルタ可）<br>3. 結果を返却 |
+| 基本フロー | 1. リサが `rulebook` を呼び出す（action, path, content, reason, persona_id）<br>2. action別に処理:<br>  - get: v_active_rulebooksから指定pathの最新有効ルールを取得<br>  - set: m_rulebooksに新バージョンをINSERT（既存pathならversion+1）<br>  - retire: 指定pathの最新版をis_retired=TRUEに更新<br>  - list: v_active_rulebooksから一覧取得（persona_idフィルタ可）<br>3. 結果を返却 |
 | 例外フロー | 1. get/retire時にkeyが存在しない → NOT_FOUNDを返却<br>2. set時にcontent未指定 → INVALID_PARAMETERを返却 |
 | 備考 | keyはプレフィックスで分類: `persona.*`（人格）、`format.*`（出力形式）、`workflow.*`（作業手順）。persona_id=NULLは全ペルソナ共通ルール |
 
@@ -330,7 +330,7 @@ emotionを「記録する」までがPh1.0のスコープ。
 - [ ] rulebook実装（ルール参照・管理）
 - [ ] topic_manage実装（トピックCRUD）
 - [ ] organize実装（タグ整理）
-- [ ] m_category廃止、t_topics/m_role/t_rulebooks等の新設テーブル
+- [ ] m_category廃止、t_topics/m_role/m_rulebooks等の新設テーブル
 - [ ] Markdown → DB移行ツール
 
 ### Phase 2.0（情報の加工）

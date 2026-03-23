@@ -2,7 +2,7 @@
 
 ## 概要
 
-CLAUDE.md（グローバル + プロジェクト）および既存 t_rulebooks のルールを、
+CLAUDE.md（グローバル + プロジェクト）および既存ルールブックのルールを、
 新しい m_rulebooks（Materialized Path構造）に統合・移行する。
 
 - CLAUDE.md → ブートローダー化（接続指示 + 最低限フォールバックのみ残す）

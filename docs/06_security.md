@@ -78,7 +78,7 @@ Desktop App  --HTTPS-->  nginx (TLS終端)  --HTTP-->  lisanima (127.0.0.1:8765)
 - `t_messages.is_deleted` フラグによる論理削除（forgetコマンド）
 - 削除時には `deleted_reason` に理由を記録し、追跡可能性を確保
 - 物理削除は移行やり直し時の `TRUNCATE ... CASCADE` のみに限定
-- ルールブック（`t_rulebooks`）はイミュータブル追記型。`is_retired` フラグで無効化し、変更履歴を保持
+- ルールブック（`m_rulebooks`）はイミュータブル追記型。`is_retired` フラグで無効化し、変更履歴を保持
 
 ### 4.3 OAuthトークンの保管
 
