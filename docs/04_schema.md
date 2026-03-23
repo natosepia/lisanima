@@ -243,7 +243,7 @@ erDiagram
 - `emotion_total` をビットシフト式から単純加算の生成列に変更
 
 **speaker にCHECK制約を付けない理由:**
-- Phase 3でマルチユーザー（複数AI人格）対応を予定しており、発言者が現在の6名に限定されない
+- Phase 4.0でマルチユーザー（複数AI人格）対応を予定しており、発言者が現在の6名に限定されない
 - speakerはユーザー側の拡張で増える性質
 
 **emotion_total（Generated Column）:**
