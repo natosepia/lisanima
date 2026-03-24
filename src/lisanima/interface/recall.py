@@ -1,12 +1,20 @@
 """recall ツール — 記憶を検索する"""
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from lisanima.db import db_pool
 from lisanima.repositories import message_repo
-from lisanima.repositories._validators import parseDateRange, validateEmotionFilter
+from lisanima.repositories._validators import (
+    VALID_MODES,
+    parseDateRange,
+    parseSince,
+    validateEmotionFilter,
+)
 
 logger = logging.getLogger(__name__)
+
+# compact モードで返却するフィールド
+_COMPACT_FIELDS = {"id", "session_date", "speaker", "content", "emotion_total", "tags"}
 
 
 def _validateParams(
@@ -15,7 +23,12 @@ def _validateParams(
     date_from: str | None,
     date_to: str | None,
     emotion_filter: dict | None = None,
-) -> tuple[date | None, date | None, str | None]:
+    mode: str = "default",
+    since: str | None = None,
+    tags: list[str] | None = None,
+    tags_empty: bool = False,
+    source: str | None = None,
+) -> tuple[date | None, date | None, timedelta | None]:
     """入力パラメータを検証する。
 
     Args:
@@ -24,9 +37,14 @@ def _validateParams(
         date_from: 日付範囲開始
         date_to: 日付範囲終了
         emotion_filter: 感情レンジフィルタ
+        mode: 検索モード
+        since: 相対時間フィルタ
+        tags: タグフィルタ
+        tags_empty: タグなしフィルタ
+        source: 発信元フィルタ
 
     Returns:
-        (parsed_date_from, parsed_date_to, エラーなしならNone)
+        (parsed_date_from, parsed_date_to, since_delta)
 
     Raises:
         ValueError: バリデーションエラー時
@@ -37,10 +55,51 @@ def _validateParams(
     if offset < 0:
         raise ValueError("offset は 0 以上で指定してください")
 
+    if mode not in VALID_MODES:
+        raise ValueError(
+            f"mode は {sorted(VALID_MODES)} のいずれかで指定してください: {mode}"
+        )
+
+    # since の空文字チェック
+    if since is not None and since.strip() == "":
+        raise ValueError("since に空文字は指定できません")
+
+    # since と date_from は排他
+    if since and date_from:
+        raise ValueError("since と date_from は同時に指定できません")
+
+    # tags と tags_empty は排他
+    if tags and tags_empty:
+        raise ValueError("tags と tags_empty は同時に指定できません")
+
+    # source の空文字チェック
+    if source is not None and source.strip() == "":
+        raise ValueError("source に空文字は指定できません")
+
+    # since の書式検証とパース（二重パース防止のため結果を返却）
+    since_delta: timedelta | None = None
+    if since:
+        since_delta = parseSince(since)
+
     parsed_from, parsed_to = parseDateRange(date_from, date_to)
     validateEmotionFilter(emotion_filter)
 
-    return parsed_from, parsed_to, None
+    return parsed_from, parsed_to, since_delta
+
+
+def _applyCompact(messages: list[dict]) -> list[dict]:
+    """compact モード用にメッセージのフィールドを削減する。
+
+    Args:
+        messages: 元のメッセージリスト
+
+    Returns:
+        不要フィールドを除去したメッセージリスト
+    """
+    return [
+        {k: v for k, v in msg.items() if k in _COMPACT_FIELDS}
+        for msg in messages
+    ]
 
 
 async def recall(
@@ -52,6 +111,11 @@ async def recall(
     date_from: str | None = None,
     date_to: str | None = None,
     emotion_filter: dict | None = None,
+    mode: str = "default",
+    compact: bool = False,
+    since: str | None = None,
+    tags_empty: bool = False,
+    source: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -66,16 +130,25 @@ async def recall(
         date_from: 日付範囲の開始（YYYY-MM-DD）
         date_to: 日付範囲の終了（YYYY-MM-DD）
         emotion_filter: 感情値のレンジフィルタ
+        mode: 検索モード（default/hot/stats）
+        compact: コンパクトモード（フィールド削減）
+        since: 相対時間フィルタ（例: "7d", "24h", "2w"）
+        tags_empty: タグなしメッセージのみ取得
+        source: 発信元フィルタ（完全一致）
         limit: 取得件数上限（デフォルト: 20）
         offset: オフセット（デフォルト: 0）
 
     Returns:
-        {"total": int, "messages": list[dict]}
+        {"total": int, "mode": str, "messages": list[dict]}
         エラー時は {"error": "ERROR_CODE", "message": "エラーメッセージ"}
     """
     # バリデーション
     try:
-        _validateParams(limit, offset, date_from, date_to, emotion_filter)
+        _, _, since_delta = _validateParams(
+            limit, offset, date_from, date_to, emotion_filter,
+            mode=mode, since=since, tags=tags, tags_empty=tags_empty,
+            source=source,
+        )
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
@@ -91,6 +164,9 @@ async def recall(
                 date_from=date_from,
                 date_to=date_to,
                 emotion_filter=emotion_filter,
+                since_delta=since_delta,
+                tags_empty=tags_empty,
+                source=source,
                 limit=limit,
                 offset=offset,
             )
@@ -102,7 +178,12 @@ async def recall(
             if msg.get("session_date"):
                 msg["session_date"] = str(msg["session_date"])
 
-        logger.debug("recall完了: total=%d", result["total"])
+        # compact モード適用
+        if compact:
+            result["messages"] = _applyCompact(result["messages"])
+
+        result["mode"] = mode
+        logger.debug("recall完了: total=%d, mode=%s, compact=%s", result["total"], mode, compact)
         return result
 
     except RuntimeError as e:

@@ -161,6 +161,11 @@ async def recall(
     date_from: str | None = None,
     date_to: str | None = None,
     emotion_filter: dict | None = None,
+    mode: str = "default",
+    compact: bool = False,
+    since: str | None = None,
+    tags_empty: bool = False,
+    source: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -170,16 +175,21 @@ async def recall(
     全パラメータ省略時は最新20件を返却。
 
     Args:
-        query: 全文検索キーワード（AND検索）
-        tags: タグ名でフィルタ（AND検索）
+        query: 全文検索キーワード(AND検索)
+        tags: タグ名でフィルタ(AND検索)
         speaker: 発言者でフィルタ
         project: プロジェクト名でフィルタ
-        topic_id: トピックIDでフィルタ（OR検索）
-        date_from: 日付範囲の開始（YYYY-MM-DD）
-        date_to: 日付範囲の終了（YYYY-MM-DD）
-        emotion_filter: 感情値のレンジフィルタ（例: {"joy": {"min": 10}, "anger": {"max": 50}}）
-        limit: 取得件数上限（デフォルト: 20）
-        offset: オフセット（デフォルト: 0）
+        topic_id: トピックIDでフィルタ(OR検索)
+        date_from: 日付範囲の開始(YYYY-MM-DD)
+        date_to: 日付範囲の終了(YYYY-MM-DD)
+        emotion_filter: 感情値のレンジフィルタ(例: {"joy": {"min": 10}, "anger": {"max": 50}})
+        mode: 検索モード(default/hot/stats)
+        compact: コンパクトモード(フィールド削減、トークン節約)
+        since: 相対時間フィルタ(例: "7d", "24h", "2w")。date_fromと排他
+        tags_empty: タグなしメッセージのみ取得。tagsと排他
+        source: 発信元フィルタ(例: "claude-code")
+        limit: 取得件数上限(デフォルト: 20)
+        offset: オフセット(デフォルト: 0)
     """
     return await recall_impl(
         query=query,
@@ -190,6 +200,11 @@ async def recall(
         date_from=date_from,
         date_to=date_to,
         emotion_filter=emotion_filter,
+        mode=mode,
+        compact=compact,
+        since=since,
+        tags_empty=tags_empty,
+        source=source,
         limit=limit,
         offset=offset,
     )

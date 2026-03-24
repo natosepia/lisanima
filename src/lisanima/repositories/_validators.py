@@ -1,8 +1,13 @@
-"""共通バリデーション関数 — 感情値・日付パースの検証ロジック"""
-from datetime import date
+"""共通バリデーション関数 — 感情値・日付パース・モード検証ロジック"""
+import re
+from datetime import date, timedelta
 
 # 感情軸の定数セット（emotion dict / emotion_filter 共通）
 VALID_EMOTION_AXES: set[str] = {"joy", "anger", "sorrow", "fun"}
+VALID_MODES: set[str] = {"default", "hot", "stats"}
+
+_SINCE_PATTERN = re.compile(r"^(\d+)([mhdw])$")
+_SINCE_UNITS: dict[str, str] = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
 
 
 def validateEmotion(emotion: dict | None) -> None:
@@ -109,3 +114,29 @@ def parseDateRange(
         )
 
     return parsed_from, parsed_to
+
+
+def parseSince(since: str) -> timedelta:
+    """相対時間文字列をtimedeltaにパースする。
+
+    recall で使用。"7d", "24h", "30m", "2w" 形式を受け付ける。
+
+    Args:
+        since: 相対時間文字列（例: "7d", "2w"）
+
+    Returns:
+        timedelta オブジェクト
+
+    Raises:
+        ValueError: 書式が不正な場合
+    """
+    match = _SINCE_PATTERN.match(since)
+    if not match:
+        raise ValueError(
+            f"since の形式が不正です（例: 30m, 24h, 7d, 2w）: {since}"
+        )
+    value = int(match.group(1))
+    unit_key = match.group(2)
+    if value <= 0:
+        raise ValueError(f"since の値は1以上で指定してください: {since}")
+    return timedelta(**{_SINCE_UNITS[unit_key]: value})

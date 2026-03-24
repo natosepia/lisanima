@@ -130,6 +130,7 @@ async def remember(
         return {
             "message_id": message["id"],
             "session_id": session["id"],
+            "emotion_total": message["emotion_total"],
             "status": "saved",
         }
 

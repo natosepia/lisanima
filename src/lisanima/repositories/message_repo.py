@@ -3,6 +3,7 @@
 t_messages テーブルへのCRUD操作を提供する。
 """
 import logging
+from datetime import timedelta
 
 from psycopg import AsyncConnection, sql
 
@@ -74,6 +75,9 @@ async def searchMessages(
     date_from: str | None = None,
     date_to: str | None = None,
     emotion_filter: dict | None = None,
+    since_delta: timedelta | None = None,
+    tags_empty: bool = False,
+    source: str | None = None,
     limit: int = 20,
     offset: int = 0,
     include_deleted: bool = False,
@@ -90,6 +94,9 @@ async def searchMessages(
         date_from: 日付範囲開始（YYYY-MM-DD）
         date_to: 日付範囲終了（YYYY-MM-DD）
         emotion_filter: 感情値レンジフィルタ
+        since_delta: パース済み相対時間フィルタ（interface層でパース済み）
+        tags_empty: タグなしメッセージのみ取得
+        source: 発信元フィルタ（完全一致）
         limit: 取得件数上限
         offset: オフセット
         include_deleted: 論理削除済みも含める（デフォルト: False）
@@ -160,6 +167,22 @@ async def searchMessages(
     if date_to:
         conditions.append("s.date <= %s")
         params.append(date_to)
+
+    # since_delta: created_atベースの相対時間フィルタ（interface層でパース済み）
+    if since_delta:
+        conditions.append("m.created_at >= NOW() - %s::interval")
+        params.append(str(since_delta))
+
+    # source: 発信元の完全一致フィルタ
+    if source:
+        conditions.append("m.source = %s")
+        params.append(source)
+
+    # tags_empty: タグなしメッセージのみ（NOT EXISTS: NULL安全+インデックス活用）
+    if tags_empty:
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM t_message_tags mt2 WHERE mt2.message_id = m.id)"
+        )
 
     # タグフィルタ（AND検索: 指定した全タグを持つメッセージのみ）
     tag_join = ""

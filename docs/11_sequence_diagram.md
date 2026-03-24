@@ -39,9 +39,6 @@ sequenceDiagram
         Server-->>Client: エラーレスポンス
     end
 
-    Remember->>MRepo: encodeEmotion(joy, anger, sorrow, fun)
-    MRepo-->>Remember: emotion_encoded (int)
-
     Remember->>DB: get_connection()
     DB-->>Remember: conn
 
@@ -70,14 +67,14 @@ sequenceDiagram
 
     Note over Remember,PG: トランザクション COMMIT
 
-    Remember-->>Server: {message_id, session_id, tags_created, status: "saved"}
+    Remember-->>Server: {message_id, session_id, emotion_total, status: "saved"}
     Server-->>Client: MCPレスポンス
 ```
 
 ### 補足
 
 - `findOrCreateSession` は `FOR UPDATE` によるロックで並行リクエスト時の競合を防止する（詳細: [09_transaction.md](./09_transaction.md)）
-- 感情ベクトルのエンコードはトランザクション外で実行（純粋な計算処理のため）
+- emotion は4カラム独立化済み（#9）。エンコード/デコード処理は不要
 - エラー発生時はトランザクションが自動ロールバックされ、エラーレスポンスを返す
 
 ## 3. recall シーケンス図
@@ -98,7 +95,7 @@ sequenceDiagram
     Client->>Server: MCP tool call: recall(query, tags, ...)
     Server->>Recall: recall(query, tags, ...)
 
-    Recall->>Recall: _validateParams(limit, offset, date_from, date_to)
+    Recall->>Recall: _validateParams(limit, offset, date_from, date_to, ..., mode, since, tags, tags_empty, source)
     alt バリデーションエラー
         Recall-->>Server: {error: "INVALID_PARAMETER"}
         Server-->>Client: エラーレスポンス
@@ -125,7 +122,7 @@ sequenceDiagram
         PG-->>MRepo: tags_by_msg
     end
 
-    MRepo->>MRepo: decodeEmotion() で各行の感情値をデコード
+    MRepo->>MRepo: emotion_total を算出（joy + anger + sorrow + fun）
     MRepo-->>Recall: {total, messages}
 
     Recall->>Recall: datetime → ISO文字列変換
