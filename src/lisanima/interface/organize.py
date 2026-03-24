@@ -115,8 +115,21 @@ async def organize(
             # 対象メッセージIDの特定
             target_ids: set[int] = set()
 
-            # message_ids 直接指定分
+            # message_ids 直接指定分（存在確認付き）
             if message_ids:
+                async with conn.cursor() as cur:
+                    placeholders = ", ".join(["%s"] * len(message_ids))
+                    await cur.execute(
+                        f"SELECT id FROM t_messages WHERE id IN ({placeholders}) AND is_deleted = FALSE",
+                        message_ids,
+                    )
+                    existing = {row["id"] for row in await cur.fetchall()}
+                missing = set(message_ids) - existing
+                if missing:
+                    return {
+                        "error": "NOT_FOUND",
+                        "message": f"指定されたメッセージIDが見つかりません: {sorted(missing)}",
+                    }
                 target_ids.update(message_ids)
 
             # 検索条件指定分
