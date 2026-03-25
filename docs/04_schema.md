@@ -67,12 +67,12 @@ erDiagram
 
 ```mermaid
 erDiagram
-    t_sessions ||--o{ t_session_topics : "1:N"
-    t_topics ||--o{ t_session_topics : "1:N"
-    t_topics ||--o{ t_topic_roles : "1:N"
-    m_role ||--o{ t_topic_roles : "1:N"
+    t_messages ||--o{ t_message_topics : "1:N"
+    t_topics ||--o{ t_message_topics : "1:N"
+    t_messages ||--o{ t_message_roles : "1:N"
+    m_role ||--o{ t_message_roles : "1:N"
 
-    t_sessions {
+    t_messages {
         int id PK
     }
 
@@ -90,8 +90,8 @@ erDiagram
         timestamptz closed_at
     }
 
-    t_session_topics {
-        int session_id FK
+    t_message_topics {
+        int message_id FK
         int topic_id FK
     }
 
@@ -102,8 +102,8 @@ erDiagram
         timestamptz created_at
     }
 
-    t_topic_roles {
-        int topic_id FK
+    t_message_roles {
+        int message_id FK
         int role_id FK
     }
 ```
@@ -308,21 +308,26 @@ t_messages と t_tags の多対多リレーション。
 - nameをUNIQUEにしない理由: 同じ議題名でも時期が異なれば別インスタンスとして管理する
 - category列なし: m_category廃止に伴い、分類はタグで吸収する
 
-### 3.6 t_session_topics（セッション×トピック）
+### 3.6 t_message_topics（メッセージ×トピック）
 
-t_sessions と t_topics の N:N 中間テーブル。
+t_messages と t_topics の N:N 中間テーブル。メッセージ単位でトピックを紐付ける。
 
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
-| session_id | INTEGER | FK → t_sessions(id) ON DELETE CASCADE, NOT NULL | セッションID |
-| topic_id | INTEGER | FK → t_topics(id) ON DELETE CASCADE, NOT NULL | トピックID |
+| message_id | INTEGER | FK → t_messages(id) ON DELETE CASCADE, NOT NULL | メッセージID |
+| topic_id | INTEGER | FK → t_topics(id) ON DELETE RESTRICT, NOT NULL | トピックID |
 
 **制約:**
-- `PRIMARY KEY(session_id, topic_id)`
+- `PRIMARY KEY(message_id, topic_id)`
+
+**旧仕様からの変更:**
+- t_session_topics（セッション×トピック）を廃止し、t_message_topics（メッセージ×トピック）に置き換え
+- トピックの紐付け粒度をセッション単位からメッセージ単位に細粒度化
+- メッセージ中心のスタースキーマにより、トピックフィルタ時のJOINがセッション経由不要になる
 
 ### 3.7 m_role（役割マスタ）
 
-トピックに紐づく役割の定義。
+メッセージに紐づく役割の定義。リサが「何として振る舞ったか」を記録する。
 
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
@@ -347,17 +352,22 @@ t_sessions と t_topics の N:N 中間テーブル。
 | creative | 創作 |
 | facilitation | 議論整理・ファシリテーション |
 
-### 3.8 t_topic_roles（トピック×役割）
+### 3.8 t_message_roles（メッセージ×役割）
 
-t_topics と m_role の N:N 中間テーブル。
+t_messages と m_role の N:N 中間テーブル。メッセージ単位でリサの役割を紐付ける。
 
 | カラム | 型 | 制約 | 説明 |
 |--------|-----|------|------|
-| topic_id | INTEGER | FK → t_topics(id) ON DELETE CASCADE, NOT NULL | トピックID |
+| message_id | INTEGER | FK → t_messages(id) ON DELETE CASCADE, NOT NULL | メッセージID |
 | role_id | INTEGER | FK → m_role(id) ON DELETE RESTRICT, NOT NULL | 役割ID |
 
 **制約:**
-- `PRIMARY KEY(topic_id, role_id)`
+- `PRIMARY KEY(message_id, role_id)`
+
+**旧仕様からの変更:**
+- t_topic_roles（トピック×役割）を廃止し、t_message_roles（メッセージ×役割）に置き換え
+- ロールの紐付け粒度をトピック単位からメッセージ単位に細粒度化
+- メッセージ中心のスタースキーマにより、タグ・ロール・トピックが全てmessageのディメンションとなる
 
 ### 3.9 m_rulebooks（ルールブック）
 
@@ -497,6 +507,22 @@ access_tokenの再取得に使用。30日で失効。
 
 ## 4. 廃止テーブル
 
+### t_session_topics（セッション×トピック）
+
+**廃止理由:** メッセージ中心のスタースキーマへの移行に伴い、トピックの紐付け粒度をセッション単位からメッセージ単位に変更。t_message_topics（メッセージ×トピック）に置き換え。
+
+**マイグレーション注意:** 既存データの移行には t_session_topics → t_message_topics へのデータ変換が必要。セッション配下の全メッセージに対してトピック紐付けを展開する。
+
+**廃止DDL:** `cre_tbl_t_session_topics.sql` を削除する。
+
+### t_topic_roles（トピック×役割）
+
+**廃止理由:** メッセージ中心のスタースキーマへの移行に伴い、ロールの紐付け粒度をトピック単位からメッセージ単位に変更。t_message_roles（メッセージ×役割）に置き換え。
+
+**マイグレーション注意:** 既存データの移行には t_topic_roles → t_message_roles へのデータ変換が必要。トピック配下の全メッセージに対してロール紐付けを展開する。
+
+**廃止DDL:** `cre_tbl_t_topic_roles.sql` はマイグレーション完了後に削除する。
+
 ### m_category（カテゴリマスタ）
 
 **廃止理由:** MCPコマンドの外部設計見直しにより、どのコマンドからもcategoryが参照されないことが証明された。分類はタグで吸収する。
@@ -557,6 +583,12 @@ CREATE INDEX idx_t_tags_name_trgm ON t_tags USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_status ON t_topics (status);
 CREATE INDEX idx_t_topics_name_trgm ON t_topics USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_emotion_total ON t_topics (emotion_total);
+
+-- t_message_topics: topic_id側のFK参照元インデックス（message_id側はPKで効く）
+CREATE INDEX idx_t_message_topics_topic_id ON t_message_topics (topic_id);
+
+-- t_message_roles: role_id側のFK参照元インデックス（message_id側はPKで効く）
+CREATE INDEX idx_t_message_roles_role_id ON t_message_roles (role_id);
 ```
 
 > **m_rulebooks**: PKが `(path, version)` のため、path前方一致検索はPKインデックスで効く。追加インデックス不要。
@@ -644,11 +676,11 @@ CREATE TABLE t_topics (
     closed_at      TIMESTAMPTZ
 );
 
--- セッション×トピック（N:N中間テーブル）
-CREATE TABLE t_session_topics (
-    session_id INTEGER NOT NULL REFERENCES t_sessions(id) ON DELETE CASCADE,
-    topic_id   INTEGER NOT NULL REFERENCES t_topics(id) ON DELETE CASCADE,
-    PRIMARY KEY (session_id, topic_id)
+-- メッセージ×トピック（N:N中間テーブル）
+CREATE TABLE t_message_topics (
+    message_id INTEGER NOT NULL REFERENCES t_messages(id) ON DELETE CASCADE,
+    topic_id   INTEGER NOT NULL REFERENCES t_topics(id) ON DELETE RESTRICT,
+    PRIMARY KEY (message_id, topic_id)
 );
 
 -- 役割マスタ
@@ -672,11 +704,11 @@ INSERT INTO m_role (name, description) VALUES
     ('creative',      '創作'),
     ('facilitation',  '議論整理・ファシリテーション');
 
--- トピック×役割（N:N中間テーブル）
-CREATE TABLE t_topic_roles (
-    topic_id INTEGER NOT NULL REFERENCES t_topics(id) ON DELETE CASCADE,
-    role_id  INTEGER NOT NULL REFERENCES m_role(id) ON DELETE RESTRICT,
-    PRIMARY KEY (topic_id, role_id)
+-- メッセージ×役割（N:N中間テーブル）
+CREATE TABLE t_message_roles (
+    message_id INTEGER NOT NULL REFERENCES t_messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL REFERENCES m_role(id) ON DELETE RESTRICT,
+    PRIMARY KEY (message_id, role_id)
 );
 
 -- ルールブック（Materialized Path + イミュータブル追記型）
@@ -684,7 +716,7 @@ CREATE TABLE m_rulebooks (
     path        TEXT NOT NULL,
     version     INTEGER NOT NULL DEFAULT 1,
     level       SMALLINT NOT NULL CONSTRAINT m_rulebooks_level_chk
-                    CHECK (level BETWEEN 1 AND 4),
+                    CHECK (level BETWEEN 1 AND 5),                      -- 階層Lv (1-5)
     content     TEXT NOT NULL,
     reason      TEXT,
     is_retired  BOOLEAN NOT NULL DEFAULT FALSE,
@@ -778,6 +810,10 @@ CREATE INDEX idx_t_tags_name_trgm ON t_tags USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_status ON t_topics (status);
 CREATE INDEX idx_t_topics_name_trgm ON t_topics USING gin (name gin_trgm_ops);
 CREATE INDEX idx_t_topics_emotion_total ON t_topics (emotion_total);
+-- t_message_topics: topic_id側のFK参照元インデックス（message_id側はPKで効く）
+CREATE INDEX idx_t_message_topics_topic_id ON t_message_topics (topic_id);
+-- t_message_roles: role_id側のFK参照元インデックス（message_id側はPKで効く）
+CREATE INDEX idx_t_message_roles_role_id ON t_message_roles (role_id);
 
 -- m_rulebooks: PK(path, version)がインデックスとして機能するため追加不要
 

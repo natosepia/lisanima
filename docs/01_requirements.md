@@ -127,9 +127,10 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 - **トリガー**: セッション中に記録すべき知見・経験が発生
 - **フロー**:
   1. リサがMCPツール `remember` を呼び出す
-  2. 発言内容・発言者・感情値・トピックIDをDBに保存
+  2. 発言内容・発言者・感情値・トピックID・ロールをDBに保存
   3. セッション情報が未作成なら自動生成
-  4. topic_id指定時はセッションとトピックの紐付けも自動作成
+  4. topic_id指定時はメッセージとトピックの紐付けも自動作成
+  5. roles指定時は未登録ロールを自動作成し、メッセージとロールの紐付けも自動作成
 
 ### UC-2: 記憶の検索（recall）
 - **アクター**: リサ（AIアシスタント）
@@ -177,7 +178,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 - **フロー**:
   1. リサがMCPツール `topic_manage` を呼び出す
   2. action（create/close/reopen/update）に応じてトピックを操作
-  3. 役割（m_role）の紐付けやセッションとの関連付けを管理
+  3. メッセージとの関連付けを管理
 
 ### UC-8: タグ整理（organize）
 - **アクター**: リサ（AIアシスタント）
@@ -219,9 +220,9 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | トリガー | リサがMCPツール `remember` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること、DB接続が有効であること |
 | 事後条件 | t_messagesに記憶が保存され、message_idが返却される。該当日のセッションが存在しない場合は自動作成される |
-| 基本フロー | 1. リサが `remember` を呼び出す（content, speaker, emotion等を指定）<br>2. 該当日付のセッションを検索（なければ自動作成）<br>3. emotionオブジェクトを4バイト整数にエンコード<br>4. topic_id指定時はt_session_topicsに紐付けを作成（ON CONFLICT DO NOTHING）<br>5. t_messagesにINSERT<br>6. 保存結果（message_id, session_id, status）を返却 |
+| 基本フロー | 1. リサが `remember` を呼び出す（content, speaker, emotion等を指定）<br>2. 該当日付のセッションを検索（なければ自動作成）<br>3. emotionオブジェクトを4バイト整数にエンコード<br>4. t_messagesにINSERT<br>5. topic_id指定時はt_message_topicsに紐付けを作成（ON CONFLICT DO NOTHING）<br>6. roles指定時は未登録ロールを自動作成し、t_message_rolesに紐付けを作成（ON CONFLICT DO NOTHING）<br>7. 保存結果（message_id, session_id, status）を返却 |
 | 例外フロー | 1. DB接続失敗 → DB_CONNECTION_ERRORを返却<br>2. パラメータ不正（content空等） → INVALID_PARAMETERを返却 |
-| 備考 | category引数は廃止済み（分類はタグで吸収）。tags引数も廃止（タグ付けはorganizeに委譲）。source列にはMCPクライアント識別子（clientInfo.name）が自動記録される |
+| 備考 | category引数は廃止済み（分類はタグで吸収）。tags引数も廃止（タグ付けはorganizeに委譲）。roles引数を追加（リサの役割をメッセージ単位で付与）。source列にはMCPクライアント識別子（clientInfo.name）が自動記録される |
 
 #### FR-002: 記憶検索（recall）
 
@@ -233,7 +234,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | 事後条件 | 検索条件に合致する記憶が返却される（is_deleted=TRUEは常に除外） |
 | 基本フロー | 1. リサが `recall` を呼び出す（query, tags, speaker, topic_id, date_from, date_to, min_emotion等を指定）<br>2. 指定条件でt_messagesを検索（pg_trgm全文検索、タグAND検索、日付範囲、感情値フィルタ）<br>3. 検索優先度: 全文検索スコア → emotion_total → created_at（降順）<br>4. 結果をlimit/offset付きで返却 |
 | 例外フロー | 1. 全パラメータ省略時 → フィルタなしで最新20件を返却<br>2. DB接続失敗 → DB_CONNECTION_ERRORを返却 |
-| 備考 | category引数は廃止済み。topic_idフィルタはt_session_topics経由で適用 |
+| 備考 | category引数は廃止済み。topic_idフィルタはt_message_topics経由で適用 |
 
 #### FR-003: 記憶削除（forget）
 
@@ -267,9 +268,9 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | トリガー | リサがMCPツール `topic_manage` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること |
 | 事後条件 | action=create: トピックが作成される。action=close: トピックがクローズされる。action=reopen: トピックが再開される。action=update: トピックが更新される |
-| 基本フロー | 1. リサが `topic_manage` を呼び出す（action, topic_id, name, roles, emotion, session_id）<br>2. action別に処理:<br>  - create: t_topicsにINSERT。roles指定時はt_topic_rolesも作成<br>  - close: statusを'closed'に、closed_atを設定<br>  - reopen: statusを'open'に、closed_atをNULLに<br>  - update: name, roles, emotionなどを更新<br>3. 結果を返却 |
+| 基本フロー | 1. リサが `topic_manage` を呼び出す（action, topic_id, name, emotion, message_ids）<br>2. action別に処理:<br>  - create: t_topicsにINSERT。message_ids指定時はt_message_topicsも作成<br>  - close: statusを'closed'に、closed_atを設定<br>  - reopen: statusを'open'に、closed_atをNULLに<br>  - update: name, emotionなどを更新<br>3. 結果を返却 |
 | 例外フロー | 1. close/reopen/update時にtopic_idが存在しない → NOT_FOUNDを返却<br>2. create時にname未指定 → INVALID_PARAMETERを返却 |
-| 備考 | nameはUNIQUE制約なし（同名でも時期が異なれば別インスタンス）。m_roleの初期データ: sparring, support, review, study, casual, coaching |
+| 備考 | nameはUNIQUE制約なし（同名でも時期が異なれば別インスタンス）。roles引数は廃止済み（ロールの紐付け先をトピック→メッセージに変更。rememberで付与） |
 
 #### FR-006: タグ整理（organize）
 
