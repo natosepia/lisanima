@@ -343,6 +343,65 @@ async def softDelete(
         return dict(row)
 
 
+async def editMessage(
+    conn: AsyncConnection,
+    message_id: int,
+    content: str | None = None,
+    emotion: dict[str, int] | None = None,
+) -> dict | None:
+    """メッセージの content / emotion を部分更新する。
+
+    指定されたフィールドのみ更新し、未指定フィールドは既存値を保持する。
+
+    Args:
+        conn: DB接続
+        message_id: 更新対象のメッセージID
+        content: 新しい内容（指定時のみ更新）
+        emotion: 新しい感情値（指定キーのみ更新）
+
+    Returns:
+        更新後のメッセージdict。存在しない/論理削除済みの場合はNone
+    """
+    # SET句の動的構築
+    set_clauses: list[str] = []
+    params: list = []
+
+    if content is not None:
+        set_clauses.append("content = %s")
+        params.append(content)
+
+    if emotion is not None:
+        for key in ("joy", "anger", "sorrow", "fun"):
+            if key in emotion:
+                set_clauses.append(f"{key} = %s")
+                params.append(emotion[key])
+
+    if not set_clauses:
+        return None
+
+    set_clause = ", ".join(set_clauses)
+    params.append(message_id)
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            UPDATE t_messages
+            SET {set_clause}
+            WHERE id = %s AND is_deleted = FALSE
+            RETURNING id, session_id, speaker, target, content,
+                      joy, anger, sorrow, fun, emotion_total, source, is_deleted, created_at
+            """,
+            params,
+        )
+        row = await cur.fetchone()
+
+    if row is None:
+        return None
+
+    logger.debug("メッセージ編集: id=%s", message_id)
+    return dict(row)
+
+
 async def _getMessageTagsBatch(
     conn: AsyncConnection,
     message_ids: list[int],

@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from lisanima.db import db_pool
+from lisanima.interface.edit import edit as edit_impl
 from lisanima.interface.forget import forget as forget_impl
 from lisanima.interface.organize import organize as organize_impl
 from lisanima.interface.recall import recall as recall_impl
@@ -216,6 +217,32 @@ async def recall(
         roles=roles,
         limit=limit,
         offset=offset,
+    )
+
+
+@mcp.tool()
+async def edit(
+    message_id: int,
+    content: str | None = None,
+    emotion: dict | None = None,
+    reason: str | None = None,
+) -> dict:
+    """既存メッセージの content / emotion を部分修正する。
+
+    直接UPDATEで、バージョン管理は行わない。
+    content と emotion の両方省略はエラー。
+
+    Args:
+        message_id: 対象メッセージID
+        content: 新しい内容（指定時のみ更新）
+        emotion: 新しい感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}（指定キーのみ更新）
+        reason: 編集理由（記録用）
+    """
+    return await edit_impl(
+        message_id=message_id,
+        content=content,
+        emotion=emotion,
+        reason=reason,
     )
 
 
