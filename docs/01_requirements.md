@@ -137,7 +137,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 - **トリガー**: 過去の経験・知見が必要な場面
 - **フロー**:
   1. リサがMCPツール `recall` を呼び出す
-  2. キーワード・タグ・日付範囲・感情値・トピックIDでフィルタ検索
+  2. キーワード・タグ・日付範囲・感情値・トピックID・ロールでフィルタ検索
   3. 関連する記憶を重要度順に返却
 
 ### UC-3: 記憶の削除（forget）
@@ -177,7 +177,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 - **トリガー**: 新しい議題の開始、既存議題のクローズ・再開
 - **フロー**:
   1. リサがMCPツール `topic_manage` を呼び出す
-  2. action（create/close/reopen/update）に応じてトピックを操作
+  2. action（create/close/reopen/update/list）に応じてトピックを操作
   3. メッセージとの関連付けを管理
 
 ### UC-8: タグ整理（organize）
@@ -232,9 +232,9 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | トリガー | リサがMCPツール `recall` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること |
 | 事後条件 | 検索条件に合致する記憶が返却される（is_deleted=TRUEは常に除外） |
-| 基本フロー | 1. リサが `recall` を呼び出す（query, tags, speaker, topic_id, date_from, date_to, min_emotion等を指定）<br>2. 指定条件でt_messagesを検索（pg_trgm全文検索、タグAND検索、日付範囲、感情値フィルタ）<br>3. 検索優先度: 全文検索スコア → emotion_total → created_at（降順）<br>4. 結果をlimit/offset付きで返却 |
+| 基本フロー | 1. リサが `recall` を呼び出す（query, tags, speaker, topic_id, roles, date_from, date_to, emotion_filter, topics_empty等を指定）<br>2. 指定条件でt_messagesを検索（pg_trgm全文検索、タグAND検索、日付範囲、感情値フィルタ、ロールフィルタ、トピック未紐付けフィルタ）<br>3. 検索優先度: 全文検索スコア → emotion_total → created_at（降順）<br>4. 結果をlimit/offset付きで返却 |
 | 例外フロー | 1. 全パラメータ省略時 → フィルタなしで最新20件を返却<br>2. DB接続失敗 → DB_CONNECTION_ERRORを返却 |
-| 備考 | category引数は廃止済み。topic_idフィルタはt_message_topics経由で適用 |
+| 備考 | category引数は廃止済み。topic_idフィルタはt_message_topics経由で適用。rolesフィルタはt_message_roles経由で適用。topics_emptyフィルタでトピック未紐付けメッセージを抽出可能（topic_idと排他） |
 
 #### FR-003: 記憶削除（forget）
 
@@ -267,8 +267,8 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | 概要 | セッション横断で管理される議題（トピック）のCRUD操作を提供する。rememberのtopic_id指定と連携し、記憶をトピック単位で整理する |
 | トリガー | リサがMCPツール `topic_manage` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること |
-| 事後条件 | action=create: トピックが作成される。action=close: トピックがクローズされる。action=reopen: トピックが再開される。action=update: トピックが更新される |
-| 基本フロー | 1. リサが `topic_manage` を呼び出す（action, topic_id, name, emotion, message_ids）<br>2. action別に処理:<br>  - create: t_topicsにINSERT。message_ids指定時はt_message_topicsも作成<br>  - close: statusを'closed'に、closed_atを設定<br>  - reopen: statusを'open'に、closed_atをNULLに<br>  - update: name, emotionなどを更新<br>3. 結果を返却 |
+| 事後条件 | action=create: トピックが作成される。action=close: トピックがクローズされる。action=reopen: トピックが再開される。action=update: トピックが更新される。action=list: トピック一覧が返却される |
+| 基本フロー | 1. リサが `topic_manage` を呼び出す（action, topic_id, name, emotion, message_ids, add_message_ids, remove_message_ids）<br>2. action別に処理:<br>  - create: t_topicsにINSERT。message_ids指定時はt_message_topicsも作成<br>  - close: statusを'closed'に、closed_atを設定<br>  - reopen: statusを'open'に、closed_atをNULLに<br>  - update: name, emotionなどを更新。add_message_ids/remove_message_idsによるメッセージ紐付けの再編成が可能<br>  - list: t_topicsからstatus/limit/offset指定で一覧取得。message_count（紐付けメッセージ数）も返却<br>3. 結果を返却 |
 | 例外フロー | 1. close/reopen/update時にtopic_idが存在しない → NOT_FOUNDを返却<br>2. create時にname未指定 → INVALID_PARAMETERを返却 |
 | 備考 | nameはUNIQUE制約なし（同名でも時期が異なれば別インスタンス）。roles引数は廃止済み（ロールの紐付け先をトピック→メッセージに変更。rememberで付与） |
 
