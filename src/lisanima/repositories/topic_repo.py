@@ -1,6 +1,6 @@
 """トピックリポジトリ
 
-t_topics / t_session_topics / t_topic_roles テーブルへのCRUD操作を提供する。
+t_topics / t_message_topics テーブルへのCRUD操作を提供する。
 """
 import logging
 
@@ -11,158 +11,147 @@ from lisanima.repositories._validators import validateEmotion
 logger = logging.getLogger(__name__)
 
 
-async def _findOrCreateRoles(
+async def linkMessageTopics(
     conn: AsyncConnection,
-    role_names: list[str],
-) -> list[dict]:
-    """ロール名のリストから、既存ロールを検索し未登録ロールは作成する。
-
-    tag_repo.findOrCreateTags と同等のパターン。
-
-    Args:
-        conn: DB接続
-        role_names: ロール名リスト
-
-    Returns:
-        ロールのdictリスト（id, name）
-    """
-    if not role_names:
-        return []
-
-    # 重複除去（順序維持）
-    normalized = list(dict.fromkeys(n.strip().lower() for n in role_names if n.strip()))
-
-    roles = []
-    async with conn.cursor() as cur:
-        for name in normalized:
-            await cur.execute(
-                """
-                INSERT INTO m_role (name) VALUES (%s)
-                ON CONFLICT (name) DO NOTHING
-                RETURNING id, name
-                """,
-                (name,),
-            )
-            row = await cur.fetchone()
-            if row:
-                roles.append(row)
-            else:
-                # 既に存在する場合はSELECT
-                await cur.execute(
-                    "SELECT id, name FROM m_role WHERE name = %s",
-                    (name,),
-                )
-                roles.append(await cur.fetchone())
-
-    logger.debug("ロール取得/作成: %s", [r["name"] for r in roles])
-    return roles
-
-
-async def _linkTopicRoles(
-    conn: AsyncConnection,
+    message_ids: list[int],
     topic_id: int,
-    role_ids: list[int],
-) -> None:
-    """トピックとロールを紐付ける。
+) -> int:
+    """メッセージ群をトピックに紐付ける。
 
     Args:
         conn: DB接続
-        topic_id: トピックID
-        role_ids: ロールIDリスト
-    """
-    if not role_ids:
-        return
-
-    async with conn.cursor() as cur:
-        for role_id in role_ids:
-            await cur.execute(
-                """
-                INSERT INTO t_topic_roles (topic_id, role_id)
-                VALUES (%s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                (topic_id, role_id),
-            )
-
-
-async def _replaceTopicRoles(
-    conn: AsyncConnection,
-    topic_id: int,
-    role_ids: list[int],
-) -> None:
-    """トピックのロール紐付けを洗い替えする（DELETE + INSERT）。
-
-    Args:
-        conn: DB接続
-        topic_id: トピックID
-        role_ids: 新しいロールIDリスト
-    """
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "DELETE FROM t_topic_roles WHERE topic_id = %s",
-            (topic_id,),
-        )
-    await _linkTopicRoles(conn, topic_id, role_ids)
-
-
-async def _getTopicRoles(
-    conn: AsyncConnection,
-    topic_id: int,
-) -> list[str]:
-    """トピックに紐付くロール名を取得する。
-
-    Args:
-        conn: DB接続
+        message_ids: メッセージIDリスト
         topic_id: トピックID
 
     Returns:
-        ロール名リスト
+        挿入行数
     """
+    if not message_ids:
+        return 0
+
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT r.name
-            FROM t_topic_roles tr
-            JOIN m_role r ON tr.role_id = r.id
-            WHERE tr.topic_id = %s
-            ORDER BY r.name
-            """,
-            (topic_id,),
-        )
-        rows = await cur.fetchall()
-    return [row["name"] for row in rows]
-
-
-async def linkSessionTopic(
-    conn: AsyncConnection,
-    session_id: int,
-    topic_id: int,
-) -> None:
-    """セッションとトピックを紐付ける（重複時は無視）。
-
-    Args:
-        conn: DB接続
-        session_id: セッションID
-        topic_id: トピックID
-    """
-    async with conn.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO t_session_topics (session_id, topic_id)
-            VALUES (%s, %s)
+            INSERT INTO t_message_topics (message_id, topic_id)
+            SELECT m_id, %s
+            FROM unnest(%s::int[]) AS m_id
             ON CONFLICT DO NOTHING
             """,
-            (session_id, topic_id),
+            (topic_id, message_ids),
         )
-    logger.debug("セッション-トピック紐付け: session_id=%s, topic_id=%s", session_id, topic_id)
+        inserted = cur.rowcount
+        logger.debug(
+            "メッセージ-トピック紐付け: topic_id=%s, messages=%d, inserted=%d",
+            topic_id, len(message_ids), inserted,
+        )
+        return inserted
+
+
+async def unlinkMessageTopics(
+    conn: AsyncConnection,
+    message_ids: list[int],
+    topic_id: int,
+) -> int:
+    """メッセージ群からトピックの紐付けを削除する。
+
+    Args:
+        conn: DB接続
+        message_ids: メッセージIDリスト
+        topic_id: トピックID
+
+    Returns:
+        削除行数
+    """
+    if not message_ids:
+        return 0
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            DELETE FROM t_message_topics
+            WHERE message_id = ANY(%s) AND topic_id = %s
+            """,
+            (message_ids, topic_id),
+        )
+        deleted = cur.rowcount
+        logger.debug(
+            "メッセージ-トピック紐付け削除: topic_id=%s, messages=%d, deleted=%d",
+            topic_id, len(message_ids), deleted,
+        )
+        return deleted
+
+
+async def listTopics(
+    conn: AsyncConnection,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """トピック一覧を取得する。
+
+    Args:
+        conn: DB接続
+        status: フィルタ（"open" / "closed" / None=全件）
+        limit: 取得件数上限
+        offset: オフセット
+
+    Returns:
+        {"total": int, "topics": list[dict]}
+    """
+    conditions: list[str] = []
+    params: list = []
+
+    if status is not None:
+        conditions.append("t.status = %s")
+        params.append(status)
+
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+    async with conn.cursor() as cur:
+        # 件数取得
+        await cur.execute(
+            f"SELECT COUNT(*) FROM t_topics t WHERE {where_clause}",
+            params,
+        )
+        total = (await cur.fetchone())["count"]
+
+        # データ取得
+        await cur.execute(
+            f"""
+            SELECT t.id AS topic_id, t.name, t.status,
+                   t.joy, t.anger, t.sorrow, t.fun, t.emotion_total,
+                   COUNT(mt.message_id) AS message_count,
+                   t.created_at, t.closed_at
+            FROM t_topics t
+            LEFT JOIN t_message_topics mt ON t.id = mt.topic_id
+            WHERE {where_clause}
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [limit, offset],
+        )
+        rows = await cur.fetchall()
+
+    topics = []
+    for row in rows:
+        topic = dict(row)
+        topic["emotion"] = {
+            "joy": topic.pop("joy"),
+            "anger": topic.pop("anger"),
+            "sorrow": topic.pop("sorrow"),
+            "fun": topic.pop("fun"),
+        }
+        topics.append(topic)
+
+    return {"total": total, "topics": topics}
 
 
 async def createTopic(
     conn: AsyncConnection,
     name: str,
     emotion: dict[str, int] | None = None,
-    roles: list[str] | None = None,
-    session_id: int | None = None,
+    message_ids: list[int] | None = None,
 ) -> dict:
     """トピックを作成する。
 
@@ -170,11 +159,10 @@ async def createTopic(
         conn: DB接続
         name: トピック名
         emotion: 感情値 {"joy": int, "anger": int, "sorrow": int, "fun": int}
-        roles: ロール名リスト（未登録のロールは自動作成）
-        session_id: セッションID（指定時にt_session_topicsへも紐付け）
+        message_ids: 紐付けるメッセージIDリスト
 
     Returns:
-        作成したトピックのdict（roles含む）
+        作成したトピックのdict（message_count含む）
     """
     # 感情値のキー・値域チェック
     validateEmotion(emotion)
@@ -199,28 +187,13 @@ async def createTopic(
     topic_id = topic["id"]
     logger.debug("トピック作成: id=%s, name=%s", topic_id, name)
 
-    # ロール紐付け
-    role_names_list: list[str] = []
-    if roles:
-        role_records = await _findOrCreateRoles(conn, roles)
-        await _linkTopicRoles(conn, topic_id, [r["id"] for r in role_records])
-        role_names_list = [r["name"] for r in role_records]
-
-    # セッション紐付け
-    if session_id is not None:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                INSERT INTO t_session_topics (session_id, topic_id)
-                VALUES (%s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                (session_id, topic_id),
-            )
-        logger.debug("セッション紐付け: session_id=%s, topic_id=%s", session_id, topic_id)
+    # メッセージ紐付け
+    message_count = 0
+    if message_ids:
+        message_count = await linkMessageTopics(conn, message_ids, topic_id)
 
     result = dict(topic)
-    result["roles"] = role_names_list
+    result["message_count"] = message_count
     return result
 
 
@@ -300,12 +273,13 @@ async def updateTopic(
     name: str | None = None,
     emotion: dict[str, int] | None = None,
     important: bool | None = None,
-    roles: list[str] | None = None,
+    add_message_ids: list[int] | None = None,
+    remove_message_ids: list[int] | None = None,
 ) -> dict | None:
     """トピックを部分更新する。
 
     指定されたフィールドのみ更新し、未指定フィールドは既存値を保持する。
-    roles指定時はt_topic_rolesを洗い替え（DELETE + INSERT）。
+    add_message_ids指定時はメッセージ紐付け追加、remove_message_ids指定時は紐付け削除。
 
     Args:
         conn: DB接続
@@ -313,10 +287,11 @@ async def updateTopic(
         name: トピック名
         emotion: 感情値 {"joy": int, "anger": int, "sorrow": int, "fun": int}
         important: 重要フラグ
-        roles: ロール名リスト（指定時は洗い替え）
+        add_message_ids: 紐付け追加するメッセージIDリスト
+        remove_message_ids: 紐付け削除するメッセージIDリスト
 
     Returns:
-        更新後のトピックdict（roles含む）、未検出の場合はNone
+        更新後のトピックdict（message_count含む）、未検出の場合はNone
     """
     # 感情値のキー・値域チェック
     validateEmotion(emotion)
@@ -354,7 +329,7 @@ async def updateTopic(
             )
             topic = await cur.fetchone()
     else:
-        # SET句がない場合はSELECTのみ（roles更新だけの可能性）
+        # SET句がない場合はSELECTのみ（メッセージ紐付け変更だけの可能性）
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT * FROM t_topics WHERE id = %s",
@@ -366,16 +341,24 @@ async def updateTopic(
         logger.debug("トピック未検出: id=%s", topic_id)
         return None
 
-    # ロール洗い替え
-    if roles is not None:
-        role_records = await _findOrCreateRoles(conn, roles)
-        await _replaceTopicRoles(conn, topic_id, [r["id"] for r in role_records])
-        role_names_list = [r["name"] for r in role_records]
-    else:
-        role_names_list = await _getTopicRoles(conn, topic_id)
+    # メッセージ紐付け追加
+    if add_message_ids:
+        await linkMessageTopics(conn, add_message_ids, topic_id)
+
+    # メッセージ紐付け削除
+    if remove_message_ids:
+        await unlinkMessageTopics(conn, remove_message_ids, topic_id)
+
+    # message_count取得
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT COUNT(*) FROM t_message_topics WHERE topic_id = %s",
+            (topic_id,),
+        )
+        message_count = (await cur.fetchone())["count"]
 
     result = dict(topic)
-    result["roles"] = role_names_list
+    result["message_count"] = message_count
     logger.debug("トピック更新: id=%s", topic_id)
     return result
 
@@ -384,18 +367,24 @@ async def getTopicById(
     conn: AsyncConnection,
     topic_id: int,
 ) -> dict | None:
-    """トピック情報と紐付きロールを取得する。
+    """トピック情報を取得する。
 
     Args:
         conn: DB接続
         topic_id: トピックID
 
     Returns:
-        トピックのdict（roles含む）、未検出の場合はNone
+        トピックのdict（message_count含む）、未検出の場合はNone
     """
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT * FROM t_topics WHERE id = %s",
+            """
+            SELECT t.*, COUNT(mt.message_id) AS message_count
+            FROM t_topics t
+            LEFT JOIN t_message_topics mt ON t.id = mt.topic_id
+            WHERE t.id = %s
+            GROUP BY t.id
+            """,
             (topic_id,),
         )
         topic = await cur.fetchone()
@@ -404,8 +393,4 @@ async def getTopicById(
         logger.debug("トピック未検出: id=%s", topic_id)
         return None
 
-    role_names = await _getTopicRoles(conn, topic_id)
-
-    result = dict(topic)
-    result["roles"] = role_names
-    return result
+    return dict(topic)

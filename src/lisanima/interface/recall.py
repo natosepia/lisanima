@@ -14,7 +14,7 @@ from lisanima.repositories._validators import (
 logger = logging.getLogger(__name__)
 
 # compact モードで返却するフィールド
-_COMPACT_FIELDS = {"id", "session_date", "speaker", "content", "emotion_total", "tags"}
+_COMPACT_FIELDS = {"id", "session_date", "speaker", "content", "emotion_total", "tags", "roles"}
 
 
 def _validateParams(
@@ -28,6 +28,8 @@ def _validateParams(
     tags: list[str] | None = None,
     tags_empty: bool = False,
     source: str | None = None,
+    topic_id: list[int] | None = None,
+    topics_empty: bool = False,
 ) -> tuple[date | None, date | None, timedelta | None]:
     """入力パラメータを検証する。
 
@@ -42,6 +44,8 @@ def _validateParams(
         tags: タグフィルタ
         tags_empty: タグなしフィルタ
         source: 発信元フィルタ
+        topic_id: トピックIDフィルタ
+        topics_empty: トピック未紐付けフィルタ
 
     Returns:
         (parsed_date_from, parsed_date_to, since_delta)
@@ -71,6 +75,10 @@ def _validateParams(
     # tags と tags_empty は排他
     if tags and tags_empty:
         raise ValueError("tags と tags_empty は同時に指定できません")
+
+    # topics_empty と topic_id は排他
+    if topics_empty and topic_id:
+        raise ValueError("topics_empty と topic_id は同時に指定できません")
 
     # source の空文字チェック
     if source is not None and source.strip() == "":
@@ -115,7 +123,9 @@ async def recall(
     compact: bool = False,
     since: str | None = None,
     tags_empty: bool = False,
+    topics_empty: bool = False,
     source: str | None = None,
+    roles: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -134,7 +144,9 @@ async def recall(
         compact: コンパクトモード（フィールド削減）
         since: 相対時間フィルタ（例: "7d", "24h", "2w"）
         tags_empty: タグなしメッセージのみ取得
+        topics_empty: トピック未紐付けメッセージのみ取得
         source: 発信元フィルタ（完全一致）
+        roles: ロール名でフィルタ（AND検索）
         limit: 取得件数上限（デフォルト: 20）
         offset: オフセット（デフォルト: 0）
 
@@ -147,7 +159,7 @@ async def recall(
         _, _, since_delta = _validateParams(
             limit, offset, date_from, date_to, emotion_filter,
             mode=mode, since=since, tags=tags, tags_empty=tags_empty,
-            source=source,
+            source=source, topic_id=topic_id, topics_empty=topics_empty,
         )
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
@@ -166,7 +178,9 @@ async def recall(
                 emotion_filter=emotion_filter,
                 since_delta=since_delta,
                 tags_empty=tags_empty,
+                topics_empty=topics_empty,
                 source=source,
+                roles=roles,
                 limit=limit,
                 offset=offset,
             )

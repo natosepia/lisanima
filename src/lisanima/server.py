@@ -123,6 +123,7 @@ async def remember(
     topic_id: int | None = None,
     project: str | None = None,
     session_date: str | None = None,
+    roles: list[str] | None = None,
 ) -> dict:
     """記憶を保存する。
 
@@ -135,9 +136,10 @@ async def remember(
         speaker: 発言者名（リサ / なとせ / ありす / 桃華 / ほたる / 晶葉）
         target: 発言先（省略時はbroadcast）
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
-        topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
+        topic_id: トピックID（指定時はメッセージとトピックの紐付けも自動作成）
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD（省略時は今日）
+        roles: 役割名の配列（sparring, support, review, study, casual等）
     """
     return await remember_impl(
         content=content,
@@ -148,6 +150,7 @@ async def remember(
         project=project,
         session_date=session_date,
         source=_getSource(ctx),
+        roles=roles,
     )
 
 
@@ -165,7 +168,9 @@ async def recall(
     compact: bool = False,
     since: str | None = None,
     tags_empty: bool = False,
+    topics_empty: bool = False,
     source: str | None = None,
+    roles: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -187,7 +192,9 @@ async def recall(
         compact: コンパクトモード(フィールド削減、トークン節約)
         since: 相対時間フィルタ(例: "7d", "24h", "2w")。date_fromと排他
         tags_empty: タグなしメッセージのみ取得。tagsと排他
+        topics_empty: トピック未紐付けメッセージのみ取得。topic_idと排他
         source: 発信元フィルタ(例: "claude-code")
+        roles: ロール名でフィルタ(AND検索)
         limit: 取得件数上限(デフォルト: 20)
         offset: オフセット(デフォルト: 0)
     """
@@ -204,7 +211,9 @@ async def recall(
         compact=compact,
         since=since,
         tags_empty=tags_empty,
+        topics_empty=topics_empty,
         source=source,
+        roles=roles,
         limit=limit,
         offset=offset,
     )
@@ -235,29 +244,41 @@ async def topic_manage(
     action: str,
     topic_id: int | None = None,
     name: str | None = None,
-    roles: list[str] | None = None,
     emotion: dict | None = None,
-    session_id: int | None = None,
+    message_ids: list[int] | None = None,
+    add_message_ids: list[int] | None = None,
+    remove_message_ids: list[int] | None = None,
+    status_filter: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
     """トピック（議題）のCRUD操作を行う。
 
-    トピックの作成・クローズ・再開・更新を行う。
+    トピックの作成・クローズ・再開・更新・一覧取得を行う。
 
     Args:
-        action: "create" / "close" / "reopen" / "update"
+        action: "create" / "close" / "reopen" / "update" / "list"
         topic_id: トピックID（close/reopen/update時必須）
         name: トピック名（create時必須）
-        roles: 役割名の配列（sparring, support, review, study, casual等）
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
-        session_id: セッションIDとの紐付け
+        message_ids: メッセージIDリスト（create時の初期紐付け）
+        add_message_ids: 追加するメッセージIDリスト（update時）
+        remove_message_ids: 削除するメッセージIDリスト（update時）
+        status_filter: ステータスフィルタ（list時: "open" / "closed"）
+        limit: 取得件数上限（list時、デフォルト: 50）
+        offset: オフセット（list時、デフォルト: 0）
     """
     return await topic_manage_impl(
         action=action,
         topic_id=topic_id,
         name=name,
-        roles=roles,
         emotion=emotion,
-        session_id=session_id,
+        message_ids=message_ids,
+        add_message_ids=add_message_ids,
+        remove_message_ids=remove_message_ids,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
     )
 
 

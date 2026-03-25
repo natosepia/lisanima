@@ -119,10 +119,10 @@ async def organize(
             if message_ids:
                 async with conn.cursor() as cur:
                     placeholders = ", ".join(["%s"] * len(message_ids))
-                    await cur.execute(
-                        f"SELECT id FROM t_messages WHERE id IN ({placeholders}) AND is_deleted = FALSE",
-                        message_ids,
-                    )
+                    sql = f"SELECT id FROM t_messages WHERE id IN ({placeholders})"
+                    if not include_deleted:
+                        sql += " AND is_deleted = FALSE"
+                    await cur.execute(sql, message_ids)
                     existing = {row["id"] for row in await cur.fetchall()}
                 missing = set(message_ids) - existing
                 if missing:

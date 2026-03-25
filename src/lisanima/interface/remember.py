@@ -3,7 +3,7 @@ import logging
 from datetime import date
 
 from lisanima.db import db_pool
-from lisanima.repositories import session_repo, message_repo, topic_repo
+from lisanima.repositories import session_repo, message_repo, topic_repo, role_repo
 from lisanima.repositories._validators import validateEmotion
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ async def remember(
     project: str | None = None,
     session_date: str | None = None,
     source: str = "unknown",
+    roles: list[str] | None = None,
 ) -> dict:
     """記憶を保存する。
 
@@ -66,10 +67,11 @@ async def remember(
         speaker: 発言者名
         target: 発言先
         emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
-        topic_id: トピックID（指定時はセッションとトピックの紐付けも自動作成）
+        topic_id: トピックID（指定時はメッセージとトピックの紐付けも自動作成）
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD
         source: MCPクライアント識別子
+        roles: 役割名の配列（指定時はメッセージとロールの紐付けを自動作成）
 
     Returns:
         {"message_id": int, "session_id": int, "status": "saved"}
@@ -113,14 +115,21 @@ async def remember(
                     source=source,
                 )
 
-                # トピック紐付け
+                # トピック紐付け（メッセージ単位）
                 if topic_id is not None:
                     topic = await topic_repo.getTopicById(conn, topic_id)
                     if not topic:
                         raise LookupError(
                             f"指定されたトピックが見つかりません（id: {topic_id}）"
                         )
-                    await topic_repo.linkSessionTopic(conn, session["id"], topic_id)
+                    await topic_repo.linkMessageTopics(conn, [message["id"]], topic_id)
+
+                # ロール紐付け
+                if roles:
+                    role_records = await role_repo.findOrCreateRoles(conn, roles)
+                    await role_repo.linkMessageRoles(
+                        conn, message["id"], [r["id"] for r in role_records],
+                    )
 
         logger.debug(
             "remember完了: message_id=%s, session_id=%s",

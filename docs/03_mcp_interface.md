@@ -339,7 +339,7 @@ compact モード有効時はフィールドを削減し、トークン消費を
 |-----------|-----|------|------|
 | action | string | Yes | "create" / "close" / "reopen" / "update" / "list" |
 | topic_id | integer | close/reopen/update時必須 | トピックID |
-| status | string | No | list時のフィルタ: "open" / "closed" / "all"。デフォルト: "all" |
+| status_filter | string | No | list時のフィルタ: "open" / "closed"。省略時は全件 |
 | limit | integer | No | list時の取得件数上限。デフォルト: 50 |
 | offset | integer | No | list時のオフセット。デフォルト: 0 |
 | name | string | create時必須 | トピック名（UNIQUEにしない。同名でも別インスタンス） |
@@ -359,7 +359,7 @@ compact モード有効時はフィールドを削減し、トークン消費を
 | close | トピックをクローズする | topic_id |
 | reopen | トピックを再開する | topic_id |
 | update | 指定フィールドのみ部分更新（未指定フィールドは既存値を保持）。add_message_ids/remove_message_idsでメッセージ紐付けの追加・削除が可能 | topic_id |
-| list | 既存トピック一覧を返却。status/limit/offsetでフィルタ・ページネーション可能 | なし |
+| list | 既存トピック一覧を返却。status_filter/limit/offsetでフィルタ・ページネーション可能 | なし |
 
 **メッセージ紐付けの使い分け:**
 - create時の `message_ids`: トピック作成と同時に初回紐付けを行う
@@ -374,7 +374,34 @@ compact モード有効時はフィールドを削減し、トークン消費を
 {
   "topic_id": 7,
   "name": "OAuth 2.1認証実装",
+  "status": "open",
+  "message_count": 0
+}
+```
+
+**レスポンス（close）:**
+```json
+{
+  "topic_id": 7,
+  "status": "closed"
+}
+```
+
+**レスポンス（reopen）:**
+```json
+{
+  "topic_id": 7,
   "status": "open"
+}
+```
+
+**レスポンス（update）:**
+```json
+{
+  "topic_id": 7,
+  "name": "OAuth 2.1認証実装",
+  "status": "open",
+  "message_count": 5
 }
 ```
 

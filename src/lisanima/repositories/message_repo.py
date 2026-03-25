@@ -77,7 +77,9 @@ async def searchMessages(
     emotion_filter: dict | None = None,
     since_delta: timedelta | None = None,
     tags_empty: bool = False,
+    topics_empty: bool = False,
     source: str | None = None,
+    roles: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
     include_deleted: bool = False,
@@ -96,7 +98,9 @@ async def searchMessages(
         emotion_filter: 感情値レンジフィルタ
         since_delta: パース済み相対時間フィルタ（interface層でパース済み）
         tags_empty: タグなしメッセージのみ取得
+        topics_empty: トピック未紐付けメッセージのみ取得
         source: 発信元フィルタ（完全一致）
+        roles: ロール名フィルタ（AND検索）
         limit: 取得件数上限
         offset: オフセット
         include_deleted: 論理削除済みも含める（デフォルト: False）
@@ -138,10 +142,10 @@ async def searchMessages(
         conditions.append("s.project = %s")
         params.append(project)
 
-    # topic_id: OR検索（いずれかのトピックに紐づくセッション）
+    # topic_id: OR検索（いずれかのトピックに紐づくメッセージ）
     if topic_id:
         conditions.append(
-            "m.session_id IN (SELECT session_id FROM t_session_topics WHERE topic_id = ANY(%s))"
+            "m.id IN (SELECT message_id FROM t_message_topics WHERE topic_id = ANY(%s))"
         )
         params.append(topic_id)
 
@@ -184,6 +188,12 @@ async def searchMessages(
             "NOT EXISTS (SELECT 1 FROM t_message_tags mt2 WHERE mt2.message_id = m.id)"
         )
 
+    # topics_empty: トピック未紐付けメッセージのみ
+    if topics_empty:
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM t_message_topics mt3 WHERE mt3.message_id = m.id)"
+        )
+
     # タグフィルタ（AND検索: 指定した全タグを持つメッセージのみ）
     tag_join = ""
     if tags:
@@ -195,16 +205,33 @@ async def searchMessages(
         conditions.append(f"t.name IN ({placeholders})")
         params.extend([t.lower().strip() for t in tags])
 
+    # ロールフィルタ（AND検索: 指定した全ロールを持つメッセージのみ）
+    role_join = ""
+    if roles:
+        role_join = """
+            JOIN t_message_roles mr ON m.id = mr.message_id
+            JOIN m_role r ON mr.role_id = r.id
+        """
+        placeholders = ", ".join(["%s"] * len(roles))
+        conditions.append(f"r.name IN ({placeholders})")
+        params.extend([r.lower().strip() for r in roles])
+
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
-    # タグのAND検索: HAVING COUNT で全タグ一致を保証
+    # タグ/ロールのAND検索: HAVING COUNT で全一致を保証
     group_by = ""
     having = ""
     having_params: list = []
-    if tags:
+    if tags or roles:
         group_by = "GROUP BY m.id, s.id"
-        having = "HAVING COUNT(DISTINCT t.name) = %s"
-        having_params = [len(tags)]
+        having_clauses: list[str] = []
+        if tags:
+            having_clauses.append("COUNT(DISTINCT t.name) = %s")
+            having_params.append(len(tags))
+        if roles:
+            having_clauses.append("COUNT(DISTINCT r.name) = %s")
+            having_params.append(len(roles))
+        having = "HAVING " + " AND ".join(having_clauses)
 
     # ORDER BY: query指定時はpg_trgm類似度（先頭キーワードで代表）、それ以外は新しい順
     if query:
@@ -222,6 +249,7 @@ async def searchMessages(
                 FROM t_messages m
                 JOIN t_sessions s ON m.session_id = s.id
                 {tag_join}
+                {role_join}
                 WHERE {where_clause}
                 {group_by}
                 {having}
@@ -243,6 +271,7 @@ async def searchMessages(
             FROM t_messages m
             JOIN t_sessions s ON m.session_id = s.id
             {tag_join}
+            {role_join}
             WHERE {where_clause}
             {group_by}
             {having}
@@ -255,13 +284,15 @@ async def searchMessages(
         )
         rows = await cur.fetchall()
 
-    # メッセージIDリストをまとめてタグを一括取得（N+1防止）
+    # メッセージIDリストをまとめてタグ・ロールを一括取得（N+1防止）
     messages = []
     message_ids = [row["id"] for row in rows]
     tags_by_msg: dict[int, list[str]] = {}
+    roles_by_msg: dict[int, list[str]] = {}
 
     if message_ids:
         tags_by_msg = await _getMessageTagsBatch(conn, message_ids)
+        roles_by_msg = await _getMessageRolesBatch(conn, message_ids)
 
     # 感情値を辞書にまとめて返す
     for row in rows:
@@ -273,6 +304,7 @@ async def searchMessages(
             "fun": msg.pop("fun"),
         }
         msg["tags"] = tags_by_msg.get(msg["id"], [])
+        msg["roles"] = roles_by_msg.get(msg["id"], [])
         messages.append(msg)
 
     logger.debug("メッセージ検索: total=%d, returned=%d", total, len(messages))
@@ -342,3 +374,36 @@ async def _getMessageTagsBatch(
     for row in rows:
         tags_by_msg.setdefault(row["message_id"], []).append(row["name"])
     return tags_by_msg
+
+
+async def _getMessageRolesBatch(
+    conn: AsyncConnection,
+    message_ids: list[int],
+) -> dict[int, list[str]]:
+    """複数メッセージのロールを一括取得する。
+
+    Args:
+        conn: DB接続
+        message_ids: メッセージIDリスト
+
+    Returns:
+        {message_id: [role_name, ...]} の辞書
+    """
+    placeholders = ", ".join(["%s"] * len(message_ids))
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            SELECT mr.message_id, r.name
+            FROM t_message_roles mr
+            JOIN m_role r ON mr.role_id = r.id
+            WHERE mr.message_id IN ({placeholders})
+            ORDER BY r.name
+            """,
+            message_ids,
+        )
+        rows = await cur.fetchall()
+
+    roles_by_msg: dict[int, list[str]] = {}
+    for row in rows:
+        roles_by_msg.setdefault(row["message_id"], []).append(row["name"])
+    return roles_by_msg
