@@ -190,13 +190,23 @@ claude mcp add --scope user lisanima -- uv run --directory /home/natosepia/proje
 
 ## 11. 将来の拡張ポイント
 
+### Phase 2.0（蓄積した記憶の整理・活用基盤）
+
+| レイヤー | 拡張 | 概要 |
+|---------|------|------|
+| 可視化 | recall `mode: "stats"` | タグ/トピック一覧・利用頻度の統計（#10） |
+| 自動浮上 | recall `mode: "hot"` | emotion×鮮度×openトピックの複合スコアリング（#11） |
+| 圧縮・精錬 | compact/reflect | MCPコマンド化見送り。クライアント側ワークフローで運用し具象を集める（#37, #38） |
+| 自動化 | lisanima CLI | オーケストレーション層（#39） |
+| 自動化 | organize/topic_manage自動発火 | CLI + cron（#24） |
+| 自動化 | Hooks連携 | セッション開始時の自動recall等 |
+
+### Phase 3.0以降
+
 | 拡張 | 概要 | 想定Phase |
 |------|------|----------|
-| lisanima CLI | Hooks・cronからDB操作するためのコマンドラインI/F | Phase 2.0 |
-| Hooks連携 | セッション開始時の自動recall、終了時の自動remember | Phase 2.0 |
-| 能動的発話 | emotion + 未完了トピック検出によるリサ起点の発話 | Phase 2.0 |
 | メンタル管理 | 外的・内的要因によるコンディション表現 | Phase 3.0 |
-| ルール同期 | ルールブックDB → CLAUDE.md / GEMINI.md 自動生成 | Phase 4.0 |
 | 埋め込みベクトル | 意味検索（セマンティック検索）の追加 | Phase 3.0 |
 | Web UI | 記憶の閲覧・編集用ダッシュボード | Phase 3.0 |
+| ルール同期 | ルールブックDB → CLAUDE.md / GEMINI.md 自動生成 | Phase 4.0 |
 | マルチユーザー | 複数AI人格の記憶管理 | Phase 4.0 |

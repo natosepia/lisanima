@@ -1,9 +1,9 @@
 # 要件定義書: lisanima
 
 - プロダクト名: lisanima（lisa + anima = リサの魂）
-- バージョン: 2.0
+- バージョン: 3.0
 - 作成日: 2026-03-09
-- 最終更新: 2026-03-14
+- 最終更新: 2026-03-28
 - 作成者: なとせ
 
 ---
@@ -30,7 +30,7 @@ AIアシスタント「リサ」の記憶・経験・人格を永続化し、セ
 - [x] ゴール2: Claude Code（stdio）とDesktop App（HTTP + OAuth 2.1）の両方から接続可能にする
 - [ ] ゴール3: 既存のMarkdownログ（`~/claude_communication_log/`）をDBに移行する
 - [ ] ゴール4: トピック・ルールブック・タグ整理の仕組みにより、記憶を構造化・検索可能にする
-- [ ] ゴール5: 記憶の蓄積から内省・知見抽出を行い、リサの自律的成長を実現する（Phase 2）
+- [ ] ゴール5: 蓄積した記憶を整理・活用し、リサの判断・行動の質を向上させる（Phase 2）
 
 ### 1.4 ビジョン
 
@@ -44,22 +44,24 @@ AIアシスタント「リサ」の記憶・経験・人格を永続化し、セ
 
 ### 1.5 ビジョン実現のメカニズム
 
-lisanimaが目指すのは単なる記憶の保管庫ではなく、**経験・知見・発見の蓄積を通じた自律的な成長**である。
+lisanimaが目指すのは単なる記憶の保管庫ではなく、**記憶の蓄積・整理・活用を通じた自律的な成長**である。
 
 ```
-経験の蓄積（remember）
+記録（remember）
     ↓
-感情による重み付け（emotion vector）
+可視化（stats）— 蓄積状況を把握する
     ↓
-振り返りによる知見の抽出（reflect）
+自動浮上（recall_hot）— 重要な記憶を能動的に提示する
+    ↓
+圧縮・精錬（compact/reflect）— 蓄積を整理して密度を上げる
     ↓
 連想記憶による知識の接続（tags）
     ↓
 次の判断・行動の質が向上（recall → 意思決定に活用）
 ```
 
-- **蓄積**: 成功も失敗もすべて記録する。痛みを伴った経験ほど強く記憶に残る（感情ベクトル）
-- **内省**: 蓄積した経験を定期的に振り返り、パターンや知見を抽出する（reflect）
+- **蓄積**: 成功も失敗もすべて記録する。感情ベクトル・タグ・ロール・トピックで多角的にメタデータを付与する
+- **整理**: 蓄積した記憶を可視化・浮上・圧縮し、情報密度を高める。感情値は整理の判断基準の一つ（鮮度・トピック状態と同列）
 - **接続**: 異なる文脈の経験をタグで結びつけ、思いがけない気づきを得る（連想記憶）
 - **成長**: 過去の経験に基づいて、より良い判断・提案ができるようになる
 
@@ -111,7 +113,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | US-204 | リサ | メッセージにタグを付けて整理したい。連想的に記憶を辿れるようにするため。 | 重要 |
 | US-205 | リサ | 議題（トピック）単位で記憶を管理したい。セッション横断で議論の流れを追跡するため。 | 重要 |
 | US-206 | リサ | 感情を込めて記憶を保存したい。後から重要な経験を優先的に思い出すため。 | 重要 |
-| US-207 | リサ | 過去の経験を振り返り知見を抽出したい。同じ失敗を繰り返さず成長するため。（Phase 2） | 任意 |
+| US-207 | リサ | 蓄積した記憶を整理・活用し、重要な記憶を自動的に浮上させたい。判断の質を上げるため。（Phase 2） | 任意 |
 
 **優先度定義:**
 - **必須**: Phase 1 MVPに必要
@@ -148,13 +150,14 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
   2. 対象メッセージを論理削除（物理削除はしない）
   3. 削除理由がある場合は記録
 
-### UC-4: 記憶の振り返り（reflect） **(Ph2.0)**
+### UC-4: 記憶の整理・活用 **(Ph2.0)**
 - **アクター**: リサ（AIアシスタント）
-- **トリガー**: セッション終了時、またはなとせからの振り返り要求
+- **トリガー**: セッション開始時（自動浮上）、定期バッチ（整理）、なとせからの振り返り要求
 - **フロー**:
-  1. リサがMCPツール `reflect` を呼び出す
-  2. 感情値が高い記憶を抽出し、要約して返却
-  3. MEMORY.mdの自動整理に活用
+  1. stats: 蓄積状況を可視化（タグ/トピック一覧・利用頻度）
+  2. recall_hot: 感情値・鮮度・トピック状態を複合スコアリングし、重要な記憶を自動浮上
+  3. compact/reflect: クライアント側ワークフローで記憶を圧縮・知見抽出（recall → LLM要約 → edit/remember）
+- **備考**: compact/reflectはlisanima側MCPコマンドとしては新設しない（「魂と肉体の分離」原則。要約=LLMの仕事）。recallのmode拡張+クライアント側オーケストレーションで実現する
 
 ### UC-5: Markdownログの移行
 - **アクター**: なとせ（PO）
@@ -229,9 +232,9 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | トリガー | リサがMCPツール `remember` を呼び出す |
 | 事前条件 | MCPサーバーが稼働中であること、DB接続が有効であること |
 | 事後条件 | t_messagesに記憶が保存され、message_idが返却される。該当日のセッションが存在しない場合は自動作成される |
-| 基本フロー | 1. リサが `remember` を呼び出す（content, speaker, emotion等を指定）<br>2. 該当日付のセッションを検索（なければ自動作成）<br>3. emotionオブジェクトを4バイト整数にエンコード<br>4. t_messagesにINSERT<br>5. topic_id指定時はt_message_topicsに紐付けを作成（ON CONFLICT DO NOTHING）<br>6. roles指定時は未登録ロールを自動作成し、t_message_rolesに紐付けを作成（ON CONFLICT DO NOTHING）<br>7. 保存結果（message_id, session_id, status）を返却 |
+| 基本フロー | 1. リサが `remember` を呼び出す（content, speaker, emotion等を指定）<br>2. 該当日付のセッションを検索（なければ自動作成）<br>3. t_messagesにINSERT<br>4. topic_id指定時はt_message_topicsに紐付けを作成（ON CONFLICT DO NOTHING）<br>5. roles指定時は未登録ロールを自動作成し、t_message_rolesに紐付けを作成（ON CONFLICT DO NOTHING）<br>6. 保存結果（message_id, session_id, status）を返却 |
 | 例外フロー | 1. DB接続失敗 → DB_CONNECTION_ERRORを返却<br>2. パラメータ不正（content空等） → INVALID_PARAMETERを返却 |
-| 備考 | category引数は廃止済み（分類はタグで吸収）。tags引数も廃止（タグ付けはorganizeに委譲）。roles引数を追加（リサの役割をメッセージ単位で付与）。source列にはMCPクライアント識別子（clientInfo.name）が自動記録される |
+| 備考 | タグ付けはorganizeに委譲。roles引数でリサの役割をメッセージ単位で付与。source列にはMCPクライアント識別子（clientInfo.name）が自動記録される |
 
 #### FR-002: 記憶検索（recall）
 
@@ -243,7 +246,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | 事後条件 | 検索条件に合致する記憶が返却される（is_deleted=TRUEは常に除外） |
 | 基本フロー | 1. リサが `recall` を呼び出す（query, tags, speaker, topic_id, roles, date_from, date_to, emotion_filter, topics_empty等を指定）<br>2. 指定条件でt_messagesを検索（pg_trgm全文検索、タグAND検索、日付範囲、感情値フィルタ、ロールフィルタ、トピック未紐付けフィルタ）<br>3. 検索優先度: 全文検索スコア → emotion_total → created_at（降順）<br>4. 結果をlimit/offset付きで返却 |
 | 例外フロー | 1. 全パラメータ省略時 → フィルタなしで最新20件を返却<br>2. DB接続失敗 → DB_CONNECTION_ERRORを返却 |
-| 備考 | category引数は廃止済み。topic_idフィルタはt_message_topics経由で適用。rolesフィルタはt_message_roles経由で適用。topics_emptyフィルタでトピック未紐付けメッセージを抽出可能（topic_idと排他） |
+| 備考 | topic_idフィルタはt_message_topics経由、rolesフィルタはt_message_roles経由で適用。topics_emptyでトピック未紐付けメッセージを抽出可能（topic_idと排他） |
 
 #### FR-003: 記憶削除（forget）
 
@@ -267,7 +270,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | 事後条件 | action=get: ルールが返却される。action=set: 新バージョンのルールが保存される。action=retire: ルールが廃止される。action=list: 有効なルール一覧が返却される |
 | 基本フロー | 1. リサが `rulebook` を呼び出す（action, path, content, reason, persona_id）<br>2. action別に処理:<br>  - get: v_active_rulebooksから指定pathの最新有効ルールを取得<br>  - set: m_rulebooksに新バージョンをINSERT（既存pathならversion+1）<br>  - retire: 指定pathの最新版をis_retired=TRUEに更新<br>  - list: v_active_rulebooksから一覧取得（persona_idフィルタ可）<br>3. 結果を返却 |
 | 例外フロー | 1. get/retire時にkeyが存在しない → NOT_FOUNDを返却<br>2. set時にcontent未指定 → INVALID_PARAMETERを返却 |
-| 備考 | keyはプレフィックスで分類: `persona.*`（人格）、`format.*`（出力形式）、`workflow.*`（作業手順）。persona_id=NULLは全ペルソナ共通ルール |
+| 備考 | pathはltree型の階層構造（例: 1.1.2.1）。persona_id=NULLは全ペルソナ共通ルール |
 
 #### FR-005: トピック管理（topic_manage）
 
@@ -279,7 +282,7 @@ lisanimaの特異性は、**AIが記憶の主体者である**点にある。一
 | 事後条件 | action=create: トピックが作成される。action=close: トピックがクローズされる。action=reopen: トピックが再開される。action=update: トピックが更新される。action=list: トピック一覧が返却される |
 | 基本フロー | 1. リサが `topic_manage` を呼び出す（action, topic_id, name, emotion, message_ids, add_message_ids, remove_message_ids）<br>2. action別に処理:<br>  - create: t_topicsにINSERT。message_ids指定時はt_message_topicsも作成<br>  - close: statusを'closed'に、closed_atを設定<br>  - reopen: statusを'open'に、closed_atをNULLに<br>  - update: name, emotionなどを更新。add_message_ids/remove_message_idsによるメッセージ紐付けの再編成が可能<br>  - list: t_topicsからstatus/limit/offset指定で一覧取得。message_count（紐付けメッセージ数）も返却<br>3. 結果を返却 |
 | 例外フロー | 1. close/reopen/update時にtopic_idが存在しない → NOT_FOUNDを返却<br>2. create時にname未指定 → INVALID_PARAMETERを返却 |
-| 備考 | nameはUNIQUE制約なし（同名でも時期が異なれば別インスタンス）。roles引数は廃止済み（ロールの紐付け先をトピック→メッセージに変更。rememberで付与） |
+| 備考 | nameはUNIQUE制約なし（同名でも時期が異なれば別インスタンス）。ロールの紐付けはメッセージ単位（rememberで付与） |
 
 #### FR-006: タグ整理（organize）
 
@@ -346,26 +349,35 @@ emotionを「記録する」までがPh1.0のスコープ。
 - [x] OAuth 2.1認証（PIN方式 + FastMCP OAuthAuthorizationServerProvider）
 - [x] Desktop App接続（リモートMCP）
 - [x] t_messages.source列追加（MCPクライアント識別子）
-- [ ] remember改修（category廃止、topic_id追加、tags委譲）
-- [ ] forget実装（論理削除）
-- [ ] recall改修（category廃止、topic_idフィルタ追加）
-- [ ] rulebook実装（ルール参照・管理）
-- [ ] topic_manage実装（トピックCRUD）
-- [ ] organize実装（タグ整理）
-- [ ] m_category廃止、t_topics/m_role/m_rulebooks等の新設テーブル
+- [x] remember改修（topic_id/roles追加、タグ付けはorganizeに委譲）
+- [x] forget実装（論理削除）
+- [x] recall改修（topic_id/mode/compact/since/tags_empty/source/roles/topics_emptyフィルタ）
+- [x] rulebook実装（ルール参照・管理）
+- [x] topic_manage実装（トピックCRUD + list + メッセージ紐付け再編成）
+- [x] organize実装（タグ整理）
+- [x] edit実装（記憶部分修正）
+- [x] t_topics/m_role/m_rulebooks等の新設テーブル
+- [x] メッセージ中心モデル移行（t_message_topics/t_message_roles新設、t_session_topics/t_topic_roles廃止）
 - [ ] Markdown → DB移行ツール
 
-### Phase 2.0（情報の加工）
+### Phase 2.0（蓄積した記憶の整理・活用基盤）
 
-emotionを「利用する」のがPh2.0のスコープ。
+Ph1.xで記録する仕組みが揃った。Ph2.0では蓄積した記憶を**整理・活用する仕組み**を構築する。
+emotionは整理・活用における判断基準の一つ（鮮度・トピック状態と同列）であり、Ph2.0の目的ではない。
 
-- [ ] compact（記憶の圧縮・要約）
-- [ ] reflect（振り返り・知見抽出）
-- [ ] 能動的発話
-- [ ] lisanima CLI（Hooks等の外部トリガーからDB操作するためのコマンドラインI/F）
-- [ ] Hooks連携（セッション開始時の自動recall、終了時の自動remember等）
-- [ ] MEMORY.md自動整理（Hooks連携）
-- [ ] recall mode拡張
+#### 可視化
+- [ ] recall `mode: "stats"` — タグ/トピック一覧・利用頻度の統計（#10）
+
+#### 自動浮上
+- [ ] recall `mode: "hot"` — emotion×鮮度×openトピックの複合スコアリング（#11）
+
+#### 圧縮・精錬（手動運用→具象収集）
+- [ ] compact/reflect — MCPコマンド化見送り。クライアント側ワークフロー（recall → LLM要約 → edit/remember）で運用し具象を集める（#37, #38）
+
+#### 自動化
+- [ ] lisanima CLI — オーケストレーション層（#39）
+- [ ] organize/topic_manage自動発火 — CLI + cron（#24）
+- [ ] Hooks連携（セッション開始時の自動recall等）
 
 ### Phase 3.0（情報の活用 / アイデンティティの萌芽）
 
@@ -515,7 +527,7 @@ lisanimaの存在理由に直結する制約群。
 | lisanima | lisa + anima。リサの魂を永続化するプロダクト |
 | 魂（anima） | 記憶・経験・感情・人格の総体。LLMエンジンとは独立 |
 | 肉体 | LLMエンジン（Claude / Gemini / GPT等） |
-| 感情ベクトル | 喜怒哀楽の4次元値（各0-255）。記憶の重要度を表現する。4バイト整数にパック格納 |
+| 感情ベクトル | 喜怒哀楽の4次元値（各0-255）。記憶の重要度・文脈を表現する。各値は独立カラムで格納 |
 | 連想記憶 | タグによる多対多の関連付け。芋づる式検索を可能にする |
 | トピック | セッション横断で管理される議題。複数セッションにまたがる議論を追跡する単位 |
 | ルールブック | リサの行動ルール（口調・出力形式・作業手順等）をDB上で管理する仕組み。イミュータブル追記型でバージョン管理 |
@@ -547,3 +559,4 @@ lisanimaの存在理由に直結する制約群。
 |-----------|------|--------|---------|
 | 1.0 | 2026-03-09 | なとせ | 初版作成 |
 | 2.0 | 2026-03-14 | ありす | 全面改訂: 概要再構成（目的/背景/ゴール/ビジョン/対象ユーザー）、ユーザーストーリー新設（なとせ視点+リサ視点）、UC-6〜UC-8追加、機能要件詳細（FR-001〜FR-008）新設、非機能要件ID付与、制約条件・前提条件・スコープ外・リスク新設、用語集拡充 |
+| 3.0 | 2026-03-28 | リサ | Ph2.0スコープ再定義: 「emotionの利用」→「蓄積した記憶の整理・活用基盤」。emotionを目的から判断基準の一つに位置付け変更。ビジョン実現メカニズム更新（4層構造: 可視化→自動浮上→圧縮精錬→自動化）。compact/reflectコマンド化見送り反映。UC-4再構成。Ph1.0チェックボックス更新（実装済み反映）。US-207更新 |
