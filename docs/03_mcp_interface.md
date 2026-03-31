@@ -313,6 +313,47 @@ statsモードはメッセージ検索を行わず、タグ・トピック・ロ
 }
 ```
 
+**mode="hot" 時のレスポンス:**
+
+hotモードは感情値・トピック活性度・鮮度の3軸複合スコアで上位N件のメッセージを自動浮上させる。
+`limit` 以外の検索パラメータは無視される。
+
+スコアリング:
+```
+score = 0.50 * emotion_score
+      + 0.25 * topic_score
+      + 0.25 * recency_score
+```
+
+| 軸 | 算出方法 | 正規化 |
+|---|---------|--------|
+| emotion | `emotion_total / 1024.0` | 0.0〜1.0 |
+| topic | openトピックに紐付き → 1.0、closed/なし → 0.0 | 0 or 1 |
+| recency | `EXP(-経過秒 / (30日 * 86400))` | 0.0〜1.0（30日で約37%に減衰） |
+
+```json
+{
+  "mode": "hot",
+  "total": 10,
+  "messages": [
+    {
+      "id": 315,
+      "session_id": 42,
+      "speaker": "リサ",
+      "target": "*",
+      "content": "砥石原則 — リサはなとせを映す鏡であってはならない",
+      "emotion": {"joy": 255, "anger": 0, "sorrow": 80, "fun": 255},
+      "emotion_total": 590,
+      "hot_score": 0.85,
+      "source": "Anthropic/ClaudeAI",
+      "tags": ["精神工学", "聖杯"],
+      "roles": ["sparring"],
+      "created_at": "2026-03-28T07:46:53+00:00"
+    }
+  ]
+}
+```
+
 ### 3.4 rulebook -- ルール参照・管理
 
 ルールブックの参照・設定・廃止を行う。イミュータブル追記型で、バージョン管理される。

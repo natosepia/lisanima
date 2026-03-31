@@ -187,6 +187,17 @@ async def recall(
                     "roles": role_stats,
                 }
 
+            # hot モード: 複合スコアリングで上位N件を自動浮上
+            if mode == "hot":
+                result = await stats_repo.getHotMessages(conn, limit=limit)
+                # datetimeをISO文字列に変換
+                for msg in result["messages"]:
+                    if msg.get("created_at"):
+                        msg["created_at"] = msg["created_at"].isoformat()
+                result["mode"] = "hot"
+                logger.debug("recall hot完了: total=%d", result["total"])
+                return result
+
             result = await message_repo.searchMessages(
                 conn,
                 query=query,

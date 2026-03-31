@@ -1,12 +1,17 @@
 """統計リポジトリ
 
-recall mode="stats" 用の統計クエリを提供する。
+recall mode="stats" / mode="hot" 用の統計・スコアリングクエリを提供する。
 メッセージ・タグ・トピック・ロールの利用状況を集計する。
 """
 import logging
 from datetime import datetime
 
 from psycopg import AsyncConnection
+
+from lisanima.repositories.message_repo import (
+    _getMessageRolesBatch,
+    _getMessageTagsBatch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,3 +222,86 @@ async def getRoleStats(
 
     logger.debug("ロール統計: total=%d", len(usage))
     return {"usage": usage}
+
+
+async def getHotMessages(
+    conn: AsyncConnection,
+    limit: int = 10,
+) -> dict:
+    """感情×トピック×鮮度の複合スコアで上位メッセージを取得する。
+
+    スコアリング:
+        score = 0.50 * emotion_score
+              + 0.25 * topic_score
+              + 0.25 * recency_score
+
+    - emotion_score: emotion_total / 1024.0 (0.0〜1.0)
+    - topic_score: openトピックに紐付き → 1.0、それ以外 → 0.0
+    - recency_score: EXP(-経過秒 / (30日*86400)) (30日で約37%に減衰)
+
+    Args:
+        conn: DB接続
+        limit: 取得件数上限（デフォルト: 10）
+
+    Returns:
+        {"total": int, "messages": [dict]}
+        各メッセージにhot_score, tags, rolesを含む
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT
+                m.id,
+                m.session_id,
+                m.speaker,
+                m.target,
+                m.content,
+                m.joy, m.anger, m.sorrow, m.fun,
+                m.emotion_total,
+                m.source,
+                m.created_at,
+                (
+                    0.50 * (m.emotion_total / 1024.0)
+                  + 0.25 * CASE WHEN EXISTS (
+                        SELECT 1 FROM t_message_topics mt2
+                        JOIN t_topics tp ON mt2.topic_id = tp.id
+                        WHERE mt2.message_id = m.id AND tp.status = 'open'
+                    ) THEN 1.0 ELSE 0.0 END
+                  + 0.25 * EXP(-EXTRACT(EPOCH FROM (NOW() - m.created_at)) / (30.0 * 86400))
+                ) AS hot_score
+            FROM t_messages m
+            WHERE m.is_deleted = FALSE
+            ORDER BY hot_score DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = await cur.fetchall()
+
+    # タグ・ロールの一括取得（N+1防止）
+    message_ids = [row["id"] for row in rows]
+    tags_by_msg: dict[int, list[str]] = {}
+    roles_by_msg: dict[int, list[str]] = {}
+
+    if message_ids:
+        tags_by_msg = await _getMessageTagsBatch(conn, message_ids)
+        roles_by_msg = await _getMessageRolesBatch(conn, message_ids)
+
+    # レスポンス構築
+    messages = []
+    for row in rows:
+        msg = dict(row)
+        msg["emotion"] = {
+            "joy": msg.pop("joy"),
+            "anger": msg.pop("anger"),
+            "sorrow": msg.pop("sorrow"),
+            "fun": msg.pop("fun"),
+        }
+        msg["hot_score"] = round(msg["hot_score"], 3)
+        msg["tags"] = tags_by_msg.get(msg["id"], [])
+        msg["roles"] = roles_by_msg.get(msg["id"], [])
+        messages.append(msg)
+
+    total = len(messages)
+    logger.debug("hotメッセージ取得: total=%d", total)
+    return {"total": total, "messages": messages}
