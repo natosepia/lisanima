@@ -1,9 +1,9 @@
 """recall ツール — 記憶を検索する"""
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from lisanima.db import db_pool
-from lisanima.repositories import message_repo
+from lisanima.repositories import message_repo, stats_repo
 from lisanima.repositories._validators import (
     VALID_MODES,
     parseDateRange,
@@ -166,6 +166,27 @@ async def recall(
 
     try:
         async with db_pool.get_connection() as conn:
+            # stats モード: 統計情報を返却して早期リターン
+            if mode == "stats":
+                # since / since_delta から datetime を算出
+                since_dt: datetime | None = None
+                if since_delta:
+                    since_dt = datetime.now().astimezone() - since_delta
+
+                summary = await stats_repo.getMessageStats(conn, since=since_dt)
+                tag_stats = await stats_repo.getTagStats(conn, since=since_dt)
+                topic_stats = await stats_repo.getTopicStats(conn, since=since_dt)
+                role_stats = await stats_repo.getRoleStats(conn, since=since_dt)
+
+                logger.debug("recall stats完了: since=%s", since_dt)
+                return {
+                    "mode": "stats",
+                    "summary": summary,
+                    "tags": tag_stats,
+                    "topics": topic_stats,
+                    "roles": role_stats,
+                }
+
             result = await message_repo.searchMessages(
                 conn,
                 query=query,
