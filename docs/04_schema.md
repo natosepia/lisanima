@@ -127,6 +127,22 @@ note bottom of rulebooks
   is_retired = FALSE のみ返す
 end note
 
+entity "m_rulebook_protocol_detail" as protocol {
+  * protocol_name : TEXT <<PK>>
+  * seq : INTEGER <<PK>>
+  --
+  content : TEXT
+  exportable : BOOLEAN
+  created_at : TIMESTAMPTZ
+  updated_at : TIMESTAMPTZ
+}
+
+note bottom of protocol
+  rulebookとのFK不要
+  （テキスト内での緩い参照）
+  UPDATE可（イミュータブルではない）
+end note
+
 ' ============================================================
 ' リレーション
 ' ============================================================
@@ -446,7 +462,39 @@ Materialized Path構造のイミュータブル追記型ルール管理テーブ
 - サロゲートキー(id)廃止 → ナチュラルキー(path + version)
 - t_constitution別テーブル案 → 同一テーブル + is_editableフラグに統合
 
-### 3.10 v_active_rulebooks（ビュー）
+### 3.10 m_rulebook_protocol_detail（プロトコル手順）
+
+compact/reflect等のワークフロー手順をDB管理するテーブル。rulebookが「何をすべきか（what）」を定義するのに対し、protocol_detailは「どうやるか（how）」を定義する。
+
+| カラム | 型 | 制約 | 説明 |
+|--------|-----|------|------|
+| protocol_name | TEXT | PK（複合）, NOT NULL | 手順名（例: 'compact', 'reflect'） |
+| seq | INTEGER | PK（複合）, NOT NULL | ステップ番号（1, 2, 3...） |
+| content | TEXT | NOT NULL | ステップ内容（Markdown可） |
+| exportable | BOOLEAN | NOT NULL, DEFAULT FALSE | `.claude/rules/` エクスポート対象フラグ |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
+| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 最終更新日時 |
+
+**制約:**
+- `PRIMARY KEY(protocol_name, seq)`
+
+**設計判断:**
+- **バージョン管理なし**: m_rulebooksと異なりUPDATE運用。手順は常に最新だけが有効であり、イミュータブル追記型にすると見づらい
+- **persona_id なし**: 手順はペルソナ非依存。誰が実行しても同じ品質を保証する設計
+- **rulebookとのFK不要**: テキスト内での緩い参照。rulebookの特定pathを手順内で言及することはあるが、構造的な結合は持たない
+- **exportable**: `.claude/rules/` への一方向エクスポート対象かどうかのフラグ。エクスポート機構の実装は別スコープ（A案: DB正→rules/エクスポート）
+
+**アクセス方法:**
+- rulebookコマンド `action="get"`, `sub_action="protocol"` で protocol_name を指定し、seq順に全ステップを一括取得。詳細は [03_mcp_interface.md](03_mcp_interface.md) セクション3.4 を参照
+- デリサ（Desktop App）もMCP経由で同じデータにアクセス可能
+
+**ステップの削除:**
+- 現時点ではMCPコマンドからの削除手段は提供しない。psql直接操作で対応する。需要が出てからコマンド化を検討（Rule of Three）
+
+**updated_at の更新:**
+- アプリ層で `ON CONFLICT DO UPDATE SET updated_at = NOW()` により自動更新する（トリガーは使用しない）
+
+### 3.11 v_active_rulebooks（ビュー）
 
 最新かつ有効なルールのみを返すビュー。
 
@@ -457,12 +505,12 @@ Materialized Path構造のイミュータブル追記型ルール管理テーブ
 
 **DDL**: [server.py](../src/lisanima/server.py) または セクション7のDDLを参照
 
-### 3.11 OAuth 2.1テーブル
+### 3.12 OAuth 2.1テーブル
 
 OAuth 2.1認証で使用するテーブル群。既存のlisanimaテーブルとはFK関連なし（独立）。
 詳細は [07_oauth.md](07_oauth.md) を参照。
 
-#### 3.11.1 m_oauth_client（OAuthクライアント）
+#### 3.12.1 m_oauth_client（OAuthクライアント）
 
 動的クライアント登録（RFC 7591）で登録されたクライアント情報。
 
@@ -472,7 +520,7 @@ OAuth 2.1認証で使用するテーブル群。既存のlisanimaテーブルと
 | client_info | JSONB | NOT NULL | OAuthClientInformationFull全体（RFC 7591準拠） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
-#### 3.11.2 t_oauth_auth_session（認可セッション）
+#### 3.12.2 t_oauth_auth_session（認可セッション）
 
 `authorize()` → `/auth/pin` 間の一時データ。10分で失効。
 
@@ -490,7 +538,7 @@ OAuth 2.1認証で使用するテーブル群。既存のlisanimaテーブルと
 | expires_at | TIMESTAMPTZ | NOT NULL | 失効日時（10分） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
-#### 3.11.3 t_oauth_auth_code（認可コード）
+#### 3.12.3 t_oauth_auth_code（認可コード）
 
 一時的な認可コード。5分で失効、1回使い切り。
 
@@ -507,7 +555,7 @@ OAuth 2.1認証で使用するテーブル群。既存のlisanimaテーブルと
 | expires_at | TIMESTAMPTZ | NOT NULL | 失効日時（5分） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
-#### 3.11.4 t_oauth_access_token（アクセストークン）
+#### 3.12.4 t_oauth_access_token（アクセストークン）
 
 MCPリクエストのBearer認証に使用。1時間で失効。
 
@@ -520,7 +568,7 @@ MCPリクエストのBearer認証に使用。1時間で失効。
 | expires_at | TIMESTAMPTZ | NOT NULL | 失効日時（1時間） |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() | 作成日時 |
 
-#### 3.11.5 t_oauth_refresh_token（リフレッシュトークン）
+#### 3.12.5 t_oauth_refresh_token（リフレッシュトークン）
 
 access_tokenの再取得に使用。30日で失効。
 
@@ -598,6 +646,7 @@ access_tokenの再取得に使用。30日で失効。
 | 感情値 | emotion_total にB-tree | recall の emotion_filter レンジ検索用 |
 | 時刻系 | created_at / expires_at にB-tree | since フィルタ、トークン期限切れ掃除用 |
 | m_rulebooks | 追加不要 | PK `(path, version)` がpath前方一致検索のインデックスとして機能 |
+| m_rulebook_protocol_detail | 追加不要 | PK `(protocol_name, seq)` で手順名→seq順取得がカバーされる |
 
 ## 7. DDL
 
@@ -616,6 +665,7 @@ access_tokenの再取得に使用。30日で失効。
 | ロール | [cre_tbl_m_role.sql](../sql/cre_tbl_m_role.sql) | 役割マスタ + 初期データ |
 | ロール | [cre_tbl_t_message_roles.sql](../sql/cre_tbl_t_message_roles.sql) | メッセージ×ロール（N:N） |
 | ルールブック | [cre_tbl_m_rulebooks.sql](../sql/cre_tbl_m_rulebooks.sql) | ルールブック（Materialized Path + イミュータブル追記型） |
+| ルールブック | [cre_tbl_m_rulebook_protocol_detail.sql](../sql/cre_tbl_m_rulebook_protocol_detail.sql) | プロトコル手順（UPDATE運用） |
 | ビュー | [cre_viw_v_active_rulebooks.sql](../sql/cre_viw_v_active_rulebooks.sql) | 最新かつ有効なルールのみ返すビュー |
 | OAuth | [cre_tbl_m_oauth_client.sql](../sql/cre_tbl_m_oauth_client.sql) | OAuthクライアント |
 | OAuth | [cre_tbl_t_oauth_auth_session.sql](../sql/cre_tbl_t_oauth_auth_session.sql) | OAuth認可セッション |

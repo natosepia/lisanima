@@ -365,29 +365,38 @@ async def organize(
 @mcp.tool()
 async def rulebook(
     action: str,
+    sub_action: str = "rule",
     key: str | None = None,
     content: str | None = None,
     reason: str | None = None,
     persona_id: str | None = None,
+    seq: int | None = None,
+    exportable: bool = False,
 ) -> dict:
-    """ルールブックの参照・設定・廃止を行う。
+    """ルールブック（what）とプロトコル（how）の参照・設定・廃止を行う。
 
-    イミュータブル追記型で、バージョン管理される。
-    最新かつ有効なルールのみを取得する。
+    sub_action="rule" は従来のルール管理（イミュータブル追記、バージョン管理）。
+    sub_action="protocol" は手順管理（UPSERT、ステップ単位）。
 
     Args:
         action: "get" / "set" / "retire" / "list"
-        key: ルールキー（例: "persona.tone", "format.code_review"）
-        content: ルール本文（set時必須、Markdown）
-        reason: 変更理由
-        persona_id: ペルソナID（省略時は全ペルソナ共通 '*'）
+        sub_action: "rule"（デフォルト）/ "protocol"
+        key: rule のルールキー / protocol の手順名（get/set/retire時必須）
+        content: rule のルール本文 / protocol のステップ内容（set時必須、Markdown）
+        reason: 変更理由（rule のみ）
+        persona_id: ペルソナID（rule のみ。省略時は全ペルソナ共通 '*'）
+        seq: ステップ番号（protocol の set 時必須）
+        exportable: .claude/rules/ エクスポート対象フラグ（protocol の set 時）
     """
     return await rulebook_impl(
         action=action,
+        sub_action=sub_action,
         key=key,
         content=content,
         reason=reason,
         persona_id=persona_id,
+        seq=seq,
+        exportable=exportable,
     )
 
 
