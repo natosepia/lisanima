@@ -125,6 +125,7 @@ async def remember(
     project: str | None = None,
     session_date: str | None = None,
     roles: list[str] | None = None,
+    compacted_from: list[int] | None = None,
 ) -> dict:
     """記憶を保存する。
 
@@ -141,6 +142,7 @@ async def remember(
         project: プロジェクト名
         session_date: セッション日付 YYYY-MM-DD（省略時は今日）
         roles: 役割名の配列（sparring, support, review, study, casual等）
+        compacted_from: compact手順で統合元となったメッセージid群（compactワークフロー専用）
     """
     return await remember_impl(
         content=content,
@@ -152,6 +154,7 @@ async def remember(
         session_date=session_date,
         source=_getSource(ctx),
         roles=roles,
+        compacted_from=compacted_from,
     )
 
 

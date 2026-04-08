@@ -23,6 +23,7 @@ async def insertMessage(
     fun: int = 0,
     target: str | None = None,
     source: str = "unknown",
+    compacted_from: list[int] | None = None,
 ) -> dict:
     """メッセージを保存する。
 
@@ -37,6 +38,7 @@ async def insertMessage(
         fun: 楽しさ (0-255)
         target: 発言先（Noneの場合は'*'をデフォルト）
         source: MCPクライアント識別子
+        compacted_from: compact手順で統合元となったメッセージid群
 
     Returns:
         保存したメッセージのdict
@@ -53,12 +55,21 @@ async def insertMessage(
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO t_messages (session_id, speaker, content, joy, anger, sorrow, fun, target, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO t_messages (
+                session_id, speaker, content,
+                joy, anger, sorrow, fun,
+                target, source, compacted_from
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, session_id, speaker, target, content,
-                      joy, anger, sorrow, fun, emotion_total, source, is_deleted, created_at
+                      joy, anger, sorrow, fun, emotion_total,
+                      source, is_deleted, compacted_from, created_at
             """,
-            (session_id, speaker, content, joy, anger, sorrow, fun, target, source),
+            (
+                session_id, speaker, content,
+                joy, anger, sorrow, fun,
+                target, source, compacted_from,
+            ),
         )
         msg = await cur.fetchone()
         logger.debug("メッセージ保存: id=%s, session_id=%s", msg["id"], session_id)

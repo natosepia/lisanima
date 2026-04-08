@@ -59,6 +59,7 @@ async def remember(
     session_date: str | None = None,
     source: str = "unknown",
     roles: list[str] | None = None,
+    compacted_from: list[int] | None = None,
 ) -> dict:
     """記憶を保存する。
 
@@ -72,6 +73,7 @@ async def remember(
         session_date: セッション日付 YYYY-MM-DD
         source: MCPクライアント識別子
         roles: 役割名の配列（指定時はメッセージとロールの紐付けを自動作成）
+        compacted_from: compact手順で統合元となったメッセージid群（compactワークフロー専用）
 
     Returns:
         {"message_id": int, "session_id": int, "status": "saved"}
@@ -89,6 +91,16 @@ async def remember(
             return {
                 "error": "INVALID_PARAMETER",
                 "message": "topic_id は正の整数で指定してください",
+            }
+
+    # compacted_from の型チェック（厳密な存在確認・二重圧縮防止は別issue予定）
+    if compacted_from is not None:
+        if not isinstance(compacted_from, list) or not all(
+            isinstance(x, int) and x > 0 for x in compacted_from
+        ):
+            return {
+                "error": "INVALID_PARAMETER",
+                "message": "compacted_from は正の整数の配列で指定してください",
             }
 
     emo = emotion or {}
@@ -113,6 +125,7 @@ async def remember(
                     fun=emo.get("fun", 0),
                     target=target,
                     source=source,
+                    compacted_from=compacted_from,
                 )
 
                 # トピック紐付け（メッセージ単位）

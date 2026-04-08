@@ -17,5 +17,11 @@ CREATE TABLE t_messages (
     source         TEXT NOT NULL DEFAULT 'unknown',
     is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_reason TEXT,
+    compacted_from INTEGER[],
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- compact操作で統合元となったメッセージid群。compact時のみNOT NULL。
+-- 逆引きで「この記憶の圧縮元は？」を辿れるようにGINインデックスを張る。
+CREATE INDEX ix_t_messages_compacted_from
+    ON t_messages USING GIN (compacted_from);
