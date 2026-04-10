@@ -93,7 +93,7 @@ async def remember(
                 "message": "topic_id は正の整数で指定してください",
             }
 
-    # compacted_from の型チェック（厳密な存在確認・二重圧縮防止は別issue予定）
+    # compacted_from の型チェック
     if compacted_from is not None:
         if not isinstance(compacted_from, list) or not all(
             isinstance(x, int) and x > 0 for x in compacted_from
@@ -107,6 +107,15 @@ async def remember(
 
     try:
         async with db_pool.get_connection() as conn:
+            # compacted_from のデータ整合性バリデーション（存在・削除・トピック・二重圧縮）
+            if compacted_from:
+                validation = await message_repo.validateCompactSource(conn, compacted_from)
+                if not validation["valid"]:
+                    return {
+                        "error": "INVALID_PARAMETER",
+                        "message": validation["error"],
+                    }
+
             async with conn.transaction():
                 # セッション取得or作成
                 session = await session_repo.findOrCreateSession(

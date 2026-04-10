@@ -477,3 +477,96 @@ async def _getMessageRolesBatch(
     for row in rows:
         roles_by_msg.setdefault(row["message_id"], []).append(row["name"])
     return roles_by_msg
+
+
+async def validateCompactSource(
+    conn: AsyncConnection,
+    ids: list[int],
+) -> dict:
+    """compact元メッセージIDリストのデータ整合性を検証する。
+
+    以下4つのチェックを1トランザクション内で実行する:
+      (a) 指定id群が全てt_messagesに存在すること
+      (d) 指定id群が全てis_deleted = FALSEであること
+      (b) 全て同一topic_idに属する（またはtopic未紐付け）こと
+      (c) 既に他の圧縮先を持っていないこと（二重圧縮防止）
+
+    Args:
+        conn: DB接続
+        ids: compact元メッセージIDリスト
+
+    Returns:
+        {"valid": True} または {"valid": False, "error": "エラーメッセージ"}
+    """
+    async with conn.cursor() as cur:
+        # --- チェック(a)(d): 存在確認 + 論理削除チェックを1クエリで処理 ---
+        await cur.execute(
+            "SELECT id, is_deleted FROM t_messages WHERE id = ANY(%s)",
+            (ids,),
+        )
+        rows = await cur.fetchall()
+
+        found_ids = {row["id"] for row in rows}
+        requested_ids = set(ids)
+        missing_ids = requested_ids - found_ids
+        if missing_ids:
+            sorted_missing = sorted(missing_ids)
+            return {
+                "valid": False,
+                "error": f"存在しないメッセージIDが含まれています: {sorted_missing}",
+            }
+
+        deleted_ids = [row["id"] for row in rows if row["is_deleted"]]
+        if deleted_ids:
+            sorted_deleted = sorted(deleted_ids)
+            return {
+                "valid": False,
+                "error": f"論理削除済みのメッセージが含まれています: {sorted_deleted}",
+            }
+
+        # --- チェック(b): 同一topic_id所属の確認 ---
+        await cur.execute(
+            """
+            SELECT DISTINCT topic_id
+            FROM t_message_topics
+            WHERE message_id = ANY(%s)
+            """,
+            (ids,),
+        )
+        topic_rows = await cur.fetchall()
+        topic_ids = [row["topic_id"] for row in topic_rows]
+        if len(topic_ids) > 1:
+            return {
+                "valid": False,
+                "error": f"複数の異なるトピックに属するメッセージが混在しています（topic_id: {sorted(topic_ids)}）",
+            }
+
+        # --- チェック(c): 二重圧縮防止（最重要） ---
+        # GINインデックス ix_t_messages_compacted_from を利用した overlap 検索
+        await cur.execute(
+            """
+            SELECT id, compacted_from
+            FROM t_messages
+            WHERE compacted_from IS NOT NULL
+              AND compacted_from && %s::integer[]
+            """,
+            (ids,),
+        )
+        conflict_rows = await cur.fetchall()
+        if conflict_rows:
+            # どのidが既に他の圧縮先に含まれているか特定する
+            conflicting: dict[int, int] = {}
+            for row in conflict_rows:
+                for src_id in row["compacted_from"]:
+                    if src_id in requested_ids:
+                        conflicting[src_id] = row["id"]
+            detail_parts = [
+                f"id={src} → 圧縮先message_id={dst}"
+                for src, dst in sorted(conflicting.items())
+            ]
+            return {
+                "valid": False,
+                "error": f"既に他のメッセージに圧縮済みのIDが含まれています: {', '.join(detail_parts)}",
+            }
+
+    return {"valid": True}
