@@ -175,6 +175,8 @@ async def recall(
     topics_empty: bool = False,
     source: str | None = None,
     roles: list[str] | None = None,
+    min_occurrences: int | None = None,
+    exclude_tags: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -199,6 +201,8 @@ async def recall(
         topics_empty: トピック未紐付けメッセージのみ取得。topic_idと排他
         source: 発信元フィルタ(例: "claude-code")
         roles: ロール名でフィルタ(AND検索)
+        min_occurrences: 最低出現回数(mode=stats時のみ有効、count >= min_occurrencesの行のみ返す)
+        exclude_tags: 除外するタグ名リスト(mode=stats時、該当タグを持つメッセージを集計から除外)
         limit: 取得件数上限(デフォルト: 20)
         offset: オフセット(デフォルト: 0)
     """
@@ -218,6 +222,8 @@ async def recall(
         topics_empty=topics_empty,
         source=source,
         roles=roles,
+        min_occurrences=min_occurrences,
+        exclude_tags=exclude_tags,
         limit=limit,
         offset=offset,
     )

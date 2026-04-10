@@ -126,6 +126,8 @@ async def recall(
     topics_empty: bool = False,
     source: str | None = None,
     roles: list[str] | None = None,
+    min_occurrences: int | None = None,
+    exclude_tags: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> dict:
@@ -147,6 +149,8 @@ async def recall(
         topics_empty: トピック未紐付けメッセージのみ取得
         source: 発信元フィルタ（完全一致）
         roles: ロール名でフィルタ（AND検索）
+        min_occurrences: 最低出現回数（mode=stats時のみ有効）
+        exclude_tags: 除外するタグ名リスト（mode=stats時、該当タグを持つメッセージを集計から除外）
         limit: 取得件数上限（デフォルト: 20）
         offset: オフセット（デフォルト: 0）
 
@@ -173,10 +177,27 @@ async def recall(
                 if since_delta:
                     since_dt = datetime.now().astimezone() - since_delta
 
-                summary = await stats_repo.getMessageStats(conn, since=since_dt)
-                tag_stats = await stats_repo.getTagStats(conn, since=since_dt)
-                topic_stats = await stats_repo.getTopicStats(conn, since=since_dt)
-                role_stats = await stats_repo.getRoleStats(conn, since=since_dt)
+                # exclude_tagsが空リストの場合はNoneとして扱う（フィルタなし）
+                effective_exclude = exclude_tags if exclude_tags else None
+
+                summary = await stats_repo.getMessageStats(
+                    conn, since=since_dt, exclude_tags=effective_exclude,
+                )
+                tag_stats = await stats_repo.getTagStats(
+                    conn, since=since_dt,
+                    min_occurrences=min_occurrences,
+                    exclude_tags=effective_exclude,
+                )
+                topic_stats = await stats_repo.getTopicStats(
+                    conn, since=since_dt,
+                    min_occurrences=min_occurrences,
+                    exclude_tags=effective_exclude,
+                )
+                role_stats = await stats_repo.getRoleStats(
+                    conn, since=since_dt,
+                    min_occurrences=min_occurrences,
+                    exclude_tags=effective_exclude,
+                )
 
                 logger.debug("recall stats完了: since=%s", since_dt)
                 return {

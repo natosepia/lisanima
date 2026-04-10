@@ -16,15 +16,49 @@ from lisanima.repositories.message_repo import (
 logger = logging.getLogger(__name__)
 
 
+def _buildExcludeTagsCondition(
+    table_alias: str,
+    exclude_tags: list[str] | None,
+    params: list,
+) -> str:
+    """exclude_tags用のNOT EXISTSサブクエリを構築する。
+
+    指定タグを持つメッセージを集計対象から除外するSQL条件を返す。
+
+    Args:
+        table_alias: メッセージテーブルのエイリアス（例: "m"）
+        exclude_tags: 除外するタグ名リスト
+        params: SQLパラメータリスト（IN句の値が追加される）
+
+    Returns:
+        SQL条件文字列。exclude_tagsが空またはNoneの場合は空文字列
+    """
+    if not exclude_tags:
+        return ""
+
+    # IN句用のプレースホルダを生成
+    placeholders = ", ".join(["%s"] * len(exclude_tags))
+    params.extend(exclude_tags)
+
+    return f"""AND NOT EXISTS (
+                SELECT 1 FROM t_message_tags ext
+                JOIN t_tags ext_t ON ext.tag_id = ext_t.id
+                WHERE ext.message_id = {table_alias}.id
+                AND ext_t.name IN ({placeholders})
+            )"""
+
+
 async def getMessageStats(
     conn: AsyncConnection,
     since: datetime | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict:
     """メッセージのサマリー統計を取得する。
 
     Args:
         conn: DB接続
         since: 期間指定（この日時以降のメッセージを対象）
+        exclude_tags: 除外するタグ名リスト（該当タグを持つメッセージを集計から除外）
 
     Returns:
         {"total_messages": int, "active_messages": int, "deleted_messages": int}
@@ -35,6 +69,11 @@ async def getMessageStats(
     if since:
         conditions.append("created_at >= %s")
         params.append(since)
+
+    # exclude_tags条件を追加
+    exclude_condition = _buildExcludeTagsCondition("t_messages", exclude_tags, params)
+    if exclude_condition:
+        conditions.append(exclude_condition.removeprefix("AND "))
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
@@ -59,6 +98,8 @@ async def getMessageStats(
 async def getTagStats(
     conn: AsyncConnection,
     since: datetime | None = None,
+    min_occurrences: int | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict:
     """タグの利用統計を取得する。
 
@@ -67,6 +108,8 @@ async def getTagStats(
     Args:
         conn: DB接続
         since: 期間指定（この日時以降のメッセージを対象）
+        min_occurrences: 最低出現回数（指定時はcount >= min_occurrences の行のみ返す）
+        exclude_tags: 除外するタグ名リスト（該当タグを持つメッセージを集計から除外）
 
     Returns:
         {"total": int, "usage": [{"name": str, "count": int}], "unused": [str]}
@@ -77,6 +120,15 @@ async def getTagStats(
     if since:
         since_condition = "AND m.created_at >= %s"
         params.append(since)
+
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
+    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+
+    # min_occurrences条件: HAVING句でフィルタ
+    having_clause = ""
+    if min_occurrences is not None:
+        having_clause = "HAVING COUNT(m.id) >= %s"
+        params.append(min_occurrences)
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -89,7 +141,9 @@ async def getTagStats(
             LEFT JOIN t_messages m ON mt.message_id = m.id
                 AND m.is_deleted = FALSE
                 {since_condition}
+                {exclude_condition}
             GROUP BY tg.id, tg.name
+            {having_clause}
             ORDER BY count DESC, tg.name
             """,
             params,
@@ -116,6 +170,8 @@ async def getTagStats(
 async def getTopicStats(
     conn: AsyncConnection,
     since: datetime | None = None,
+    min_occurrences: int | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict:
     """トピックの利用統計を取得する。
 
@@ -125,6 +181,8 @@ async def getTopicStats(
     Args:
         conn: DB接続
         since: 期間指定（この日時以降のメッセージを対象）
+        min_occurrences: 最低メッセージ数（指定時はmessage_count >= min_occurrences の行のみ返す）
+        exclude_tags: 除外するタグ名リスト（該当タグを持つメッセージを集計から除外）
 
     Returns:
         {"total": int, "by_status": {"open": int, "closed": int},
@@ -135,6 +193,15 @@ async def getTopicStats(
     if since:
         since_condition = "AND m.created_at >= %s"
         params.append(since)
+
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
+    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+
+    # min_occurrences条件: HAVING句でフィルタ
+    having_clause = ""
+    if min_occurrences is not None:
+        having_clause = "HAVING COUNT(m.id) >= %s"
+        params.append(min_occurrences)
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -149,7 +216,9 @@ async def getTopicStats(
             LEFT JOIN t_messages m ON mt.message_id = m.id
                 AND m.is_deleted = FALSE
                 {since_condition}
+                {exclude_condition}
             GROUP BY tp.id, tp.name, tp.status
+            {having_clause}
             ORDER BY message_count DESC, tp.name
             """,
             params,
@@ -182,6 +251,8 @@ async def getTopicStats(
 async def getRoleStats(
     conn: AsyncConnection,
     since: datetime | None = None,
+    min_occurrences: int | None = None,
+    exclude_tags: list[str] | None = None,
 ) -> dict:
     """ロールの利用統計を取得する。
 
@@ -190,6 +261,8 @@ async def getRoleStats(
     Args:
         conn: DB接続
         since: 期間指定（この日時以降のメッセージを対象）
+        min_occurrences: 最低出現回数（指定時はcount >= min_occurrences の行のみ返す）
+        exclude_tags: 除外するタグ名リスト（該当タグを持つメッセージを集計から除外）
 
     Returns:
         {"usage": [{"name": str, "count": int}]}
@@ -199,6 +272,15 @@ async def getRoleStats(
     if since:
         since_condition = "AND m.created_at >= %s"
         params.append(since)
+
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
+    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+
+    # min_occurrences条件: HAVING句でフィルタ
+    having_clause = ""
+    if min_occurrences is not None:
+        having_clause = "HAVING COUNT(m.id) >= %s"
+        params.append(min_occurrences)
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -211,7 +293,9 @@ async def getRoleStats(
             LEFT JOIN t_messages m ON mr.message_id = m.id
                 AND m.is_deleted = FALSE
                 {since_condition}
+                {exclude_condition}
             GROUP BY r.id, r.name
+            {having_clause}
             ORDER BY count DESC, r.name
             """,
             params,
