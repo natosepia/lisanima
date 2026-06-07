@@ -95,19 +95,27 @@ def _validateParams(
     return parsed_from, parsed_to, since_delta
 
 
-def _applyCompact(messages: list[dict]) -> list[dict]:
+def _applyCompact(
+    messages: list[dict], content_limit: int | None = None
+) -> list[dict]:
     """compact モード用にメッセージのフィールドを削減する。
 
     Args:
         messages: 元のメッセージリスト
+        content_limit: content を先頭 N 文字へ切り詰める（None=全文）
 
     Returns:
         不要フィールドを除去したメッセージリスト
     """
-    return [
-        {k: v for k, v in msg.items() if k in _COMPACT_FIELDS}
-        for msg in messages
-    ]
+    result: list[dict] = []
+    for msg in messages:
+        slimmed = {k: v for k, v in msg.items() if k in _COMPACT_FIELDS}
+        # content_limit 指定時は本文を切り詰めて tool ペイロードを抑制する
+        content = slimmed.get("content")
+        if content_limit is not None and isinstance(content, str) and len(content) > content_limit:
+            slimmed["content"] = content[:content_limit] + "…(省略)"
+        result.append(slimmed)
+    return result
 
 
 async def recall(
@@ -121,6 +129,7 @@ async def recall(
     emotion_filter: dict | None = None,
     mode: str = "default",
     compact: bool = False,
+    content_limit: int | None = None,
     since: str | None = None,
     tags_empty: bool = False,
     topics_empty: bool = False,
@@ -128,7 +137,7 @@ async def recall(
     roles: list[str] | None = None,
     min_occurrences: int | None = None,
     exclude_tags: list[str] | None = None,
-    limit: int = 20,
+    limit: int = 10,
     offset: int = 0,
 ) -> dict:
     """記憶を検索する。
@@ -144,6 +153,7 @@ async def recall(
         emotion_filter: 感情値のレンジフィルタ
         mode: 検索モード（default/hot/stats）
         compact: コンパクトモード（フィールド削減）
+        content_limit: compact時に content を先頭N文字へ切り詰める（None=全文）
         since: 相対時間フィルタ（例: "7d", "24h", "2w"）
         tags_empty: タグなしメッセージのみ取得
         topics_empty: トピック未紐付けメッセージのみ取得
@@ -151,7 +161,7 @@ async def recall(
         roles: ロール名でフィルタ（AND検索）
         min_occurrences: 最低出現回数（mode=stats時のみ有効）
         exclude_tags: 除外するタグ名リスト（mode=stats時、該当タグを持つメッセージを集計から除外）
-        limit: 取得件数上限（デフォルト: 20）
+        limit: 取得件数上限（デフォルト: 10）
         offset: オフセット（デフォルト: 0）
 
     Returns:
@@ -247,7 +257,7 @@ async def recall(
 
         # compact モード適用
         if compact:
-            result["messages"] = _applyCompact(result["messages"])
+            result["messages"] = _applyCompact(result["messages"], content_limit=content_limit)
 
         result["mode"] = mode
         logger.debug("recall完了: total=%d, mode=%s, compact=%s", result["total"], mode, compact)
