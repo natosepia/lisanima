@@ -4,6 +4,7 @@
 authorize() からリダイレクトされたユーザーにPIN入力フォームを表示し、
 PIN検証成功で認可コードを発行してクライアントにリダイレクトする。
 """
+import asyncio
 import logging
 import os
 import time
@@ -21,10 +22,14 @@ from lisanima.repositories import oauth_repo
 logger = logging.getLogger(__name__)
 
 # ブルートフォース対策: 失敗回数/ロックアウト
+# Note: マルチワーカー（uvicorn --workers N）下ではプロセス間共有されないため、
+#       本番でワーカーを増やす際は DB / Redis での集計に切り替える前提。
+#       単一ワーカー内のasync race condition は _state_lock で直列化する。
 _MAX_FAILURES = 5
 _LOCKOUT_SECONDS = 30
 _failure_count = 0
 _lockout_until = 0.0
+_state_lock = asyncio.Lock()
 
 # テンプレートキャッシュ
 _template_cache: str | None = None
@@ -169,29 +174,30 @@ async def handlePinPost(request: Request) -> Response:
             status_code=302,
         )
 
-    # ロックアウトチェック
-    if _checkLockout():
-        template = _loadTemplate()
-        html = template.replace("{{session_id}}", escape(session_id)).replace(
-            "{{error}}", "認証試行回数を超過しました。しばらくお待ちください。"
-        )
-        return HTMLResponse(html, status_code=429)
+    # ロックアウト判定〜検証〜失敗カウンタ更新を直列化（async race condition 回避）
+    async with _state_lock:
+        if _checkLockout():
+            template = _loadTemplate()
+            html = template.replace("{{session_id}}", escape(session_id)).replace(
+                "{{error}}", "認証試行回数を超過しました。しばらくお待ちください。"
+            )
+            return HTMLResponse(html, status_code=429)
 
-    # PIN検証
-    if not _verifyPin(pin):
-        _recordFailure()
-        client_ip = request.client.host if request.client else "unknown"
-        logger.warning("PIN認証失敗: ip=%s", client_ip)
-        remaining = _MAX_FAILURES - _failure_count
-        error_msg = f"PINが正しくありません（残り{remaining}回）" if remaining > 0 else "ロックアウトされました。しばらくお待ちください。"
-        template = _loadTemplate()
-        html = template.replace("{{session_id}}", escape(session_id)).replace(
-            "{{error}}", error_msg,
-        )
-        return HTMLResponse(html, status_code=401)
+        # PIN検証
+        if not _verifyPin(pin):
+            _recordFailure()
+            client_ip = request.client.host if request.client else "unknown"
+            logger.warning("PIN認証失敗: ip=%s", client_ip)
+            remaining = _MAX_FAILURES - _failure_count
+            error_msg = f"PINが正しくありません（残り{remaining}回）" if remaining > 0 else "ロックアウトされました。しばらくお待ちください。"
+            template = _loadTemplate()
+            html = template.replace("{{session_id}}", escape(session_id)).replace(
+                "{{error}}", error_msg,
+            )
+            return HTMLResponse(html, status_code=401)
 
-    # PIN検証成功
-    _resetFailures()
+        # PIN検証成功
+        _resetFailures()
 
     # 認可コード発行
     async with db_pool.get_connection() as conn:

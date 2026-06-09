@@ -23,7 +23,8 @@ def _buildExcludeTagsCondition(
 ) -> str:
     """exclude_tags用のNOT EXISTSサブクエリを構築する。
 
-    指定タグを持つメッセージを集計対象から除外するSQL条件を返す。
+    指定タグを持つメッセージを集計対象から除外する純粋な条件式（前置詞なし）を返す。
+    呼び出し側で `AND` や `WHERE` の文脈に応じて結合すること。
 
     Args:
         table_alias: メッセージテーブルのエイリアス（例: "m"）
@@ -31,21 +32,36 @@ def _buildExcludeTagsCondition(
         params: SQLパラメータリスト（IN句の値が追加される）
 
     Returns:
-        SQL条件文字列。exclude_tagsが空またはNoneの場合は空文字列
+        素のSQL条件文字列（"NOT EXISTS (...)"）。
+        exclude_tagsが空またはNoneの場合は空文字列
     """
     if not exclude_tags:
         return ""
 
-    # IN句用のプレースホルダを生成
     placeholders = ", ".join(["%s"] * len(exclude_tags))
     params.extend(exclude_tags)
 
-    return f"""AND NOT EXISTS (
+    return f"""NOT EXISTS (
                 SELECT 1 FROM t_message_tags ext
                 JOIN t_tags ext_t ON ext.tag_id = ext_t.id
                 WHERE ext.message_id = {table_alias}.id
                 AND ext_t.name IN ({placeholders})
             )"""
+
+
+def _prefixedAnd(condition: str) -> str:
+    """JOIN ON / WHERE 句内で連結する用に "AND " を前置する。
+
+    `_buildExcludeTagsCondition` 等が返す純粋条件式を、`AND xxx ... AND` の
+    並びに差し込むときの揺れを1箇所に集約する。
+
+    Args:
+        condition: 純粋条件式（空文字なら何もしない）
+
+    Returns:
+        "AND <condition>" もしくは ""
+    """
+    return f"AND {condition}" if condition else ""
 
 
 async def getMessageStats(
@@ -70,10 +86,10 @@ async def getMessageStats(
         conditions.append("created_at >= %s")
         params.append(since)
 
-    # exclude_tags条件を追加
+    # exclude_tags条件を追加（純粋な NOT EXISTS をそのまま AND 結合）
     exclude_condition = _buildExcludeTagsCondition("t_messages", exclude_tags, params)
     if exclude_condition:
-        conditions.append(exclude_condition.removeprefix("AND "))
+        conditions.append(exclude_condition)
 
     where_clause = " AND ".join(conditions) if conditions else "TRUE"
 
@@ -121,8 +137,8 @@ async def getTagStats(
         since_condition = "AND m.created_at >= %s"
         params.append(since)
 
-    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
-    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外（JOIN ON句に挿入するため "AND " 付与）
+    exclude_condition = _prefixedAnd(_buildExcludeTagsCondition("m", exclude_tags, params))
 
     # min_occurrences条件: HAVING句でフィルタ
     having_clause = ""
@@ -194,8 +210,8 @@ async def getTopicStats(
         since_condition = "AND m.created_at >= %s"
         params.append(since)
 
-    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
-    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外（JOIN ON句に挿入するため "AND " 付与）
+    exclude_condition = _prefixedAnd(_buildExcludeTagsCondition("m", exclude_tags, params))
 
     # min_occurrences条件: HAVING句でフィルタ
     having_clause = ""
@@ -273,8 +289,8 @@ async def getRoleStats(
         since_condition = "AND m.created_at >= %s"
         params.append(since)
 
-    # exclude_tags条件: 指定タグを持つメッセージを集計から除外
-    exclude_condition = _buildExcludeTagsCondition("m", exclude_tags, params)
+    # exclude_tags条件: 指定タグを持つメッセージを集計から除外（JOIN ON句に挿入するため "AND " 付与）
+    exclude_condition = _prefixedAnd(_buildExcludeTagsCondition("m", exclude_tags, params))
 
     # min_occurrences条件: HAVING句でフィルタ
     having_clause = ""

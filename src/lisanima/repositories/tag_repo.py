@@ -45,28 +45,23 @@ async def findOrCreateTags(
     normalized = [normalizeTagName(n) for n in tag_names if n.strip()]
     normalized = list(dict.fromkeys(normalized))  # 重複除去（順序維持）
 
-    tags = []
+    # 2ラウンドトリップで定数回数化（旧実装は N 件で 1〜2N 回のラウンドトリップが発生していた）。
+    # 1. 未登録分のみワンショット INSERT（既存は ON CONFLICT で握りつぶす）
+    # 2. ANY(%s) で全件 SELECT して id を引く
     async with conn.cursor() as cur:
-        for name in normalized:
-            # INSERT ... ON CONFLICT でupsert
-            await cur.execute(
-                """
-                INSERT INTO t_tags (name) VALUES (%s)
-                ON CONFLICT (name) DO NOTHING
-                RETURNING id, name
-                """,
-                (name,),
-            )
-            row = await cur.fetchone()
-            if row:
-                tags.append(row)
-            else:
-                # 既に存在する場合はSELECT
-                await cur.execute(
-                    "SELECT id, name FROM t_tags WHERE name = %s",
-                    (name,),
-                )
-                tags.append(await cur.fetchone())
+        await cur.execute(
+            """
+            INSERT INTO t_tags (name)
+            SELECT unnest(%s::text[])
+            ON CONFLICT (name) DO NOTHING
+            """,
+            (normalized,),
+        )
+        await cur.execute(
+            "SELECT id, name FROM t_tags WHERE name = ANY(%s)",
+            (normalized,),
+        )
+        tags = await cur.fetchall()
 
     logger.debug("タグ取得/作成: %s", [t["name"] for t in tags])
     return tags

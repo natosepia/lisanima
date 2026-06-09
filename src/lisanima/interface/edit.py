@@ -2,12 +2,14 @@
 import logging
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import message_repo
 from lisanima.repositories._validators import validateEmotion
 
 logger = logging.getLogger(__name__)
 
 
+@handleInterfaceErrors("edit")
 async def edit(
     message_id: int,
     content: str | None = None,
@@ -58,31 +60,23 @@ async def edit(
     if reason:
         logger.info("edit reason: message_id=%s, reason=%s", message_id, reason)
 
-    try:
-        async with db_pool.get_connection() as conn:
-            async with conn.transaction():
-                result = await message_repo.editMessage(
-                    conn,
-                    message_id=message_id,
-                    content=content,
-                    emotion=emotion,
-                )
+    async with db_pool.get_connection() as conn:
+        async with conn.transaction():
+            result = await message_repo.editMessage(
+                conn,
+                message_id=message_id,
+                content=content,
+                emotion=emotion,
+            )
 
-        if result is None:
-            return {
-                "error": "NOT_FOUND",
-                "message": f"指定されたメッセージが見つかりません（id: {message_id}）",
-            }
-
-        logger.debug("edit完了: message_id=%s", message_id)
+    if result is None:
         return {
-            "message_id": result["id"],
-            "status": "edited",
+            "error": "NOT_FOUND",
+            "message": f"指定されたメッセージが見つかりません（id: {message_id}）",
         }
 
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception as e:
-        logger.error("edit failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    logger.debug("edit完了: message_id=%s", message_id)
+    return {
+        "message_id": result["id"],
+        "status": "edited",
+    }

@@ -3,6 +3,7 @@ import logging
 from datetime import date
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import message_repo, tag_repo
 from lisanima.repositories._validators import parseDateRange, validateEmotionFilter
 
@@ -62,6 +63,7 @@ def _validateParams(
     return parsed_from, parsed_to
 
 
+@handleInterfaceErrors("organize")
 async def organize(
     message_ids: list[int] | None = None,
     query: list[str] | None = None,
@@ -110,86 +112,78 @@ async def organize(
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
-    try:
-        async with db_pool.get_connection() as conn:
-            # 対象メッセージIDの特定
-            target_ids: set[int] = set()
+    async with db_pool.get_connection() as conn:
+        # 対象メッセージIDの特定
+        target_ids: set[int] = set()
 
-            # message_ids 直接指定分（存在確認付き）
-            if message_ids:
-                async with conn.cursor() as cur:
-                    placeholders = ", ".join(["%s"] * len(message_ids))
-                    sql = f"SELECT id FROM t_messages WHERE id IN ({placeholders})"
-                    if not include_deleted:
-                        sql += " AND is_deleted = FALSE"
-                    await cur.execute(sql, message_ids)
-                    existing = {row["id"] for row in await cur.fetchall()}
-                missing = set(message_ids) - existing
-                if missing:
-                    return {
-                        "error": "NOT_FOUND",
-                        "message": f"指定されたメッセージIDが見つかりません: {sorted(missing)}",
-                    }
-                target_ids.update(message_ids)
-
-            # 検索条件指定分
-            has_search = any([query, tags, speaker, project, topic_id, date_from, date_to, emotion_filter])
-            if has_search:
-                result = await message_repo.searchMessages(
-                    conn,
-                    query=query,
-                    tags=tags,
-                    speaker=speaker,
-                    project=project,
-                    topic_id=topic_id,
-                    date_from=date_from,
-                    date_to=date_to,
-                    emotion_filter=emotion_filter,
-                    limit=limit,
-                    offset=0,
-                    include_deleted=include_deleted,
-                )
-                for msg in result["messages"]:
-                    target_ids.add(msg["id"])
-
-            target_id_list = list(target_ids)
-
-            if not target_id_list:
+        # message_ids 直接指定分（存在確認付き）
+        if message_ids:
+            async with conn.cursor() as cur:
+                placeholders = ", ".join(["%s"] * len(message_ids))
+                query_sql = f"SELECT id FROM t_messages WHERE id IN ({placeholders})"
+                if not include_deleted:
+                    query_sql += " AND is_deleted = FALSE"
+                await cur.execute(query_sql, message_ids)
+                existing = {row["id"] for row in await cur.fetchall()}
+            missing = set(message_ids) - existing
+            if missing:
                 return {
-                    "organized_count": 0,
-                    "tags_added": add_tags or [],
-                    "tags_removed": remove_tags or [],
+                    "error": "NOT_FOUND",
+                    "message": f"指定されたメッセージIDが見つかりません: {sorted(missing)}",
                 }
+            target_ids.update(message_ids)
 
-            async with conn.transaction():
-                # add_tags 処理
-                tags_added_names: list[str] = []
-                if add_tags:
-                    tag_records = await tag_repo.findOrCreateTags(conn, add_tags)
-                    tag_ids = [t["id"] for t in tag_records]
-                    await tag_repo.linkMessageTagsBatch(conn, target_id_list, tag_ids)
-                    tags_added_names = [t["name"] for t in tag_records]
+        # 検索条件指定分
+        has_search = any([query, tags, speaker, project, topic_id, date_from, date_to, emotion_filter])
+        if has_search:
+            result = await message_repo.searchMessages(
+                conn,
+                query=query,
+                tags=tags,
+                speaker=speaker,
+                project=project,
+                topic_id=topic_id,
+                date_from=date_from,
+                date_to=date_to,
+                emotion_filter=emotion_filter,
+                limit=limit,
+                offset=0,
+                include_deleted=include_deleted,
+            )
+            for msg in result["messages"]:
+                target_ids.add(msg["id"])
 
-                # remove_tags 処理
-                tags_removed_names: list[str] = []
-                if remove_tags:
-                    await tag_repo.unlinkMessageTagsBatch(conn, target_id_list, remove_tags)
-                    tags_removed_names = [tag_repo.normalizeTagName(t) for t in remove_tags if t.strip()]
+        target_id_list = list(target_ids)
 
-        logger.debug(
-            "organize完了: count=%d, added=%s, removed=%s",
-            len(target_id_list), tags_added_names, tags_removed_names,
-        )
+        if not target_id_list:
+            return {
+                "organized_count": 0,
+                "tags_added": add_tags or [],
+                "tags_removed": remove_tags or [],
+            }
 
-        return {
-            "organized_count": len(target_id_list),
-            "tags_added": tags_added_names,
-            "tags_removed": tags_removed_names,
-        }
+        async with conn.transaction():
+            # add_tags 処理
+            tags_added_names: list[str] = []
+            if add_tags:
+                tag_records = await tag_repo.findOrCreateTags(conn, add_tags)
+                tag_ids = [t["id"] for t in tag_records]
+                await tag_repo.linkMessageTagsBatch(conn, target_id_list, tag_ids)
+                tags_added_names = [t["name"] for t in tag_records]
 
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception as e:
-        logger.error("organize failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+            # remove_tags 処理
+            tags_removed_names: list[str] = []
+            if remove_tags:
+                await tag_repo.unlinkMessageTagsBatch(conn, target_id_list, remove_tags)
+                tags_removed_names = [tag_repo.normalizeTagName(t) for t in remove_tags if t.strip()]
+
+    logger.debug(
+        "organize完了: count=%d, added=%s, removed=%s",
+        len(target_id_list), tags_added_names, tags_removed_names,
+    )
+
+    return {
+        "organized_count": len(target_id_list),
+        "tags_added": tags_added_names,
+        "tags_removed": tags_removed_names,
+    }

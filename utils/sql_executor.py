@@ -23,10 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from lisanima.db import get_dsn
 
 
-# SQLファイルの配置ディレクトリ
-SQL_DIR = Path(__file__).parent.parent / "sql"
-
-
 def _getConnection() -> psycopg.Connection:
     """同期DB接続を取得する。
 

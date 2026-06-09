@@ -2,6 +2,7 @@
 import logging
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import topic_repo
 from lisanima.repositories._validators import validateEmotion
 
@@ -54,6 +55,7 @@ def _validateParams(
     validateEmotion(emotion)
 
 
+@handleInterfaceErrors("topicManage")
 async def topicManage(
     action: str,
     topic_id: int | None = None,
@@ -90,28 +92,20 @@ async def topicManage(
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
-    try:
-        async with db_pool.get_connection() as conn:
-            async with conn.transaction():
-                if action == "list":
-                    return await _handleList(conn, status_filter, limit, offset)
-                elif action == "create":
-                    return await _handleCreate(conn, name, emotion, message_ids)
-                elif action == "close":
-                    return await _handleClose(conn, topic_id)
-                elif action == "reopen":
-                    return await _handleReopen(conn, topic_id)
-                else:  # update
-                    return await _handleUpdate(
-                        conn, topic_id, name, emotion, add_message_ids, remove_message_ids,
-                    )
-
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception:
-        logger.error("topicManage failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    async with db_pool.get_connection() as conn:
+        async with conn.transaction():
+            if action == "list":
+                return await _handleList(conn, status_filter, limit, offset)
+            elif action == "create":
+                return await _handleCreate(conn, name, emotion, message_ids)
+            elif action == "close":
+                return await _handleClose(conn, topic_id)
+            elif action == "reopen":
+                return await _handleReopen(conn, topic_id)
+            else:  # update
+                return await _handleUpdate(
+                    conn, topic_id, name, emotion, add_message_ids, remove_message_ids,
+                )
 
 
 async def _handleList(

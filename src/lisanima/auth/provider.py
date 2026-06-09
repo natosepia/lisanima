@@ -6,11 +6,9 @@ PostgreSQL をストレージとする OAuth 2.1 認可サーバーを提供す�
 import logging
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from mcp.server.auth.provider import (
-    AuthorizationParams,
-    OAuthAuthorizationServerProvider,
-)
+from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from lisanima.db import db_pool
@@ -92,7 +90,7 @@ class LisanimaOAuthProvider:
         client_info.client_id = secrets.token_urlsafe(16)
         client_info.client_secret = secrets.token_urlsafe(32)
         client_info.client_id_issued_at = int(
-            oauth_repo._utcnow().timestamp()
+            datetime.now(timezone.utc).timestamp()
         )
 
         async with db_pool.get_connection() as conn:

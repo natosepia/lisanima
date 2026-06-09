@@ -3,6 +3,7 @@ import logging
 from datetime import date
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import session_repo, message_repo, topic_repo, role_repo
 from lisanima.repositories._validators import validateEmotion
 
@@ -49,6 +50,7 @@ def _validateParams(
     return target_date, None
 
 
+@handleInterfaceErrors("remember")
 async def remember(
     content: str,
     speaker: str,
@@ -105,9 +107,10 @@ async def remember(
 
     emo = emotion or {}
 
-    try:
-        async with db_pool.get_connection() as conn:
+    async with db_pool.get_connection() as conn:
+        async with conn.transaction():
             # compacted_from のデータ整合性バリデーション（存在・削除・トピック・二重圧縮）
+            # TOCTOU回避のためトランザクション内に配置する
             if compacted_from:
                 validation = await message_repo.validateCompactSource(conn, compacted_from)
                 if not validation["valid"]:
@@ -116,60 +119,50 @@ async def remember(
                         "message": validation["error"],
                     }
 
-            async with conn.transaction():
-                # セッション取得or作成
-                session = await session_repo.findOrCreateSession(
-                    conn, target_date, project=project,
-                )
+            # セッション取得or作成
+            session = await session_repo.findOrCreateSession(
+                conn, target_date, project=project,
+            )
 
-                # メッセージ保存
-                message = await message_repo.insertMessage(
-                    conn,
-                    session_id=session["id"],
-                    speaker=speaker,
-                    content=content,
-                    joy=emo.get("joy", 0),
-                    anger=emo.get("anger", 0),
-                    sorrow=emo.get("sorrow", 0),
-                    fun=emo.get("fun", 0),
-                    target=target,
-                    source=source,
-                    compacted_from=compacted_from,
-                )
+            # メッセージ保存
+            message = await message_repo.insertMessage(
+                conn,
+                session_id=session["id"],
+                speaker=speaker,
+                content=content,
+                joy=emo.get("joy", 0),
+                anger=emo.get("anger", 0),
+                sorrow=emo.get("sorrow", 0),
+                fun=emo.get("fun", 0),
+                target=target,
+                source=source,
+                compacted_from=compacted_from,
+            )
 
-                # トピック紐付け（メッセージ単位）
-                if topic_id is not None:
-                    topic = await topic_repo.getTopicById(conn, topic_id)
-                    if not topic:
-                        raise LookupError(
-                            f"指定されたトピックが見つかりません（id: {topic_id}）"
-                        )
-                    await topic_repo.linkMessageTopics(conn, [message["id"]], topic_id)
-
-                # ロール紐付け
-                if roles:
-                    role_records = await role_repo.findOrCreateRoles(conn, roles)
-                    await role_repo.linkMessageRoles(
-                        conn, message["id"], [r["id"] for r in role_records],
+            # トピック紐付け（メッセージ単位）
+            if topic_id is not None:
+                topic = await topic_repo.getTopicById(conn, topic_id)
+                if not topic:
+                    raise LookupError(
+                        f"指定されたトピックが見つかりません（id: {topic_id}）"
                     )
+                await topic_repo.linkMessageTopics(conn, [message["id"]], topic_id)
 
-        logger.debug(
-            "remember完了: message_id=%s, session_id=%s",
-            message["id"], session["id"],
-        )
+            # ロール紐付け
+            if roles:
+                role_records = await role_repo.findOrCreateRoles(conn, roles)
+                await role_repo.linkMessageRoles(
+                    conn, message["id"], [r["id"] for r in role_records],
+                )
 
-        return {
-            "message_id": message["id"],
-            "session_id": session["id"],
-            "emotion_total": message["emotion_total"],
-            "status": "saved",
-        }
+    logger.debug(
+        "remember完了: message_id=%s, session_id=%s",
+        message["id"], session["id"],
+    )
 
-    except LookupError as e:
-        return {"error": "NOT_FOUND", "message": str(e)}
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception as e:
-        logger.error("remember failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    return {
+        "message_id": message["id"],
+        "session_id": session["id"],
+        "emotion_total": message["emotion_total"],
+        "status": "saved",
+    }

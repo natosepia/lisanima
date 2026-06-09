@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import protocol_repo, rulebook_repo
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ def _toIsoString(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
+@handleInterfaceErrors("rulebook")
 async def rulebook(
     action: str,
     sub_action: str = "rule",
@@ -101,23 +103,15 @@ async def rulebook(
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
-    try:
-        async with db_pool.get_connection() as conn:
-            if sub_action == "rule":
-                return await _dispatchRule(
-                    conn, action, key, content, reason, persona_id,
-                )
-            else:
-                return await _dispatchProtocol(
-                    conn, action, key, content, seq, exportable,
-                )
-
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception:
-        logger.error("rulebook failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    async with db_pool.get_connection() as conn:
+        if sub_action == "rule":
+            return await _dispatchRule(
+                conn, action, key, content, reason, persona_id,
+            )
+        else:
+            return await _dispatchProtocol(
+                conn, action, key, content, seq, exportable,
+            )
 
 
 # ============================================================

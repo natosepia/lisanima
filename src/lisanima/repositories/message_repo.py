@@ -5,7 +5,7 @@ t_messages テーブルへのCRUD操作を提供する。
 import logging
 from datetime import timedelta
 
-from psycopg import AsyncConnection, sql
+from psycopg import AsyncConnection
 
 from lisanima.repositories._validators import VALID_EMOTION_AXES
 

@@ -2,11 +2,13 @@
 import logging
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import message_repo
 
 logger = logging.getLogger(__name__)
 
 
+@handleInterfaceErrors("forget")
 async def forget(message_id: int, reason: str | None = None) -> dict:
     """指定した記憶を論理削除する。物理削除は行わない。
 
@@ -27,28 +29,20 @@ async def forget(message_id: int, reason: str | None = None) -> dict:
 
     delete_reason = reason if reason else "none"
 
-    try:
-        async with db_pool.get_connection() as conn:
-            async with conn.transaction():
-                result = await message_repo.softDelete(
-                    conn, message_id, reason=delete_reason,
-                )
+    async with db_pool.get_connection() as conn:
+        async with conn.transaction():
+            result = await message_repo.softDelete(
+                conn, message_id, reason=delete_reason,
+            )
 
-        if result is None:
-            return {
-                "error": "NOT_FOUND",
-                "message": f"指定されたメッセージが見つかりません（id: {message_id}）",
-            }
-
-        logger.debug("forget完了: message_id=%s", message_id)
+    if result is None:
         return {
-            "message_id": result["id"],
-            "status": "forgotten",
+            "error": "NOT_FOUND",
+            "message": f"指定されたメッセージが見つかりません（id: {message_id}）",
         }
 
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception as e:
-        logger.error("forget failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    logger.debug("forget完了: message_id=%s", message_id)
+    return {
+        "message_id": result["id"],
+        "status": "forgotten",
+    }

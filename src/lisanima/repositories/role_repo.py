@@ -32,28 +32,21 @@ async def findOrCreateRoles(
         n.strip().lower() for n in role_names if n.strip()
     ))
 
-    roles = []
+    # 2ラウンドトリップで定数回数化（旧実装は N 件で 1〜2N 回のラウンドトリップが発生していた）。
     async with conn.cursor() as cur:
-        for name in normalized:
-            # INSERT ... ON CONFLICT で upsert
-            await cur.execute(
-                """
-                INSERT INTO m_role (name) VALUES (%s)
-                ON CONFLICT (name) DO NOTHING
-                RETURNING id, name
-                """,
-                (name,),
-            )
-            row = await cur.fetchone()
-            if row:
-                roles.append(row)
-            else:
-                # 既に存在する場合はSELECT
-                await cur.execute(
-                    "SELECT id, name FROM m_role WHERE name = %s",
-                    (name,),
-                )
-                roles.append(await cur.fetchone())
+        await cur.execute(
+            """
+            INSERT INTO m_role (name)
+            SELECT unnest(%s::text[])
+            ON CONFLICT (name) DO NOTHING
+            """,
+            (normalized,),
+        )
+        await cur.execute(
+            "SELECT id, name FROM m_role WHERE name = ANY(%s)",
+            (normalized,),
+        )
+        roles = await cur.fetchall()
 
     logger.debug("ロール取得/作成: %s", [r["name"] for r in roles])
     return roles

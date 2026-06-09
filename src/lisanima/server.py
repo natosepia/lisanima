@@ -48,12 +48,15 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
         logger.info("lisanima MCPサーバー終了")
 
 
-def _createMcp(http_mode: bool = False) -> FastMCP:
+def _buildMcp(http_mode: bool) -> FastMCP:
     """FastMCPインスタンスを生成する。
 
     Args:
         http_mode: TrueならOAuth 2.1認証を有効にしたHTTPモード用インスタンスを返す。
                    Falseならstdioモード用（認証なし）。
+
+    Returns:
+        ツール未登録のFastMCPインスタンス。`_registerTools` 呼び出しで登録すること。
     """
     if http_mode:
         from mcp.server.auth.settings import (
@@ -94,15 +97,6 @@ def _createMcp(http_mode: bool = False) -> FastMCP:
     return server
 
 
-# stdioモードのデフォルトインスタンス。ツール登録デコレータが参照する。
-# HTTPモード時は main() で再構築して差し替える。
-mcp = _createMcp()
-
-
-# ----------------------------------------------------------
-# MCPツール登録
-# ----------------------------------------------------------
-
 def _getSource(ctx: Context) -> str:
     """MCPコンテキストから接続元クライアント名を取得する。"""
     try:
@@ -114,299 +108,305 @@ def _getSource(ctx: Context) -> str:
     return "unknown"
 
 
-@mcp.tool()
-async def remember(
-    content: str,
-    speaker: str,
-    ctx: Context,
-    target: str | None = None,
-    emotion: dict | None = None,
-    topic_id: int | None = None,
-    project: str | None = None,
-    session_date: str | None = None,
-    roles: list[str] | None = None,
-    compacted_from: list[int] | None = None,
-) -> dict:
-    """記憶を保存する。
+def _registerTools(server: FastMCP) -> None:
+    """MCPツールを指定サーバーに登録する。
 
-    セッション中の発言・知見をDBに永続化する。
-    セッションは日付単位で自動管理される。
-    タグ付けは organize コマンドで行う。
+    stdioモード/HTTPモードのどちらでも同じ関数で登録するため、FastMCPの
+    内部API（旧 `_tool_manager._tools`）に触らずモード差分を吸収できる。
 
     Args:
-        content: 発言・記憶の内容
-        speaker: 発言者名（リサ / なとせ / ありす / 桃華 / ほたる / 晶葉）
-        target: 発言先（省略時はbroadcast）
-        emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
-        topic_id: トピックID（指定時はメッセージとトピックの紐付けも自動作成）
-        project: プロジェクト名
-        session_date: セッション日付 YYYY-MM-DD（省略時は今日）
-        roles: 役割名の配列（sparring, support, review, study, casual等）
-        compacted_from: compact手順で統合元となったメッセージid群（compactワークフロー専用）
+        server: ツール登録先のFastMCPインスタンス
     """
-    return await remember_impl(
-        content=content,
-        speaker=speaker,
-        target=target,
-        emotion=emotion,
-        topic_id=topic_id,
-        project=project,
-        session_date=session_date,
-        source=_getSource(ctx),
-        roles=roles,
-        compacted_from=compacted_from,
-    )
+    @server.tool()
+    async def remember(
+        content: str,
+        speaker: str,
+        ctx: Context,
+        target: str | None = None,
+        emotion: dict | None = None,
+        topic_id: int | None = None,
+        project: str | None = None,
+        session_date: str | None = None,
+        roles: list[str] | None = None,
+        compacted_from: list[int] | None = None,
+    ) -> dict:
+        """記憶を保存する。
 
+        セッション中の発言・知見をDBに永続化する。
+        セッションは日付単位で自動管理される。
+        タグ付けは organize コマンドで行う。
 
-@mcp.tool()
-async def recall(
-    query: list[str] | None = None,
-    tags: list[str] | None = None,
-    speaker: str | None = None,
-    project: str | None = None,
-    topic_id: list[int] | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    emotion_filter: dict | None = None,
-    mode: str = "default",
-    compact: bool = False,
-    since: str | None = None,
-    tags_empty: bool = False,
-    topics_empty: bool = False,
-    source: str | None = None,
-    roles: list[str] | None = None,
-    min_occurrences: int | None = None,
-    exclude_tags: list[str] | None = None,
-    limit: int = 20,
-    offset: int = 0,
-) -> dict:
-    """記憶を検索する。
+        Args:
+            content: 発言・記憶の内容
+            speaker: 発言者名（リサ / なとせ / ありす / 桃華 / ほたる / 晶葉）
+            target: 発言先（省略時はbroadcast）
+            emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
+            topic_id: トピックID（指定時はメッセージとトピックの紐付けも自動作成）
+            project: プロジェクト名
+            session_date: セッション日付 YYYY-MM-DD（省略時は今日）
+            roles: 役割名の配列（sparring, support, review, study, casual等）
+            compacted_from: compact手順で統合元となったメッセージid群（compactワークフロー専用）
+        """
+        return await remember_impl(
+            content=content,
+            speaker=speaker,
+            target=target,
+            emotion=emotion,
+            topic_id=topic_id,
+            project=project,
+            session_date=session_date,
+            source=_getSource(ctx),
+            roles=roles,
+            compacted_from=compacted_from,
+        )
 
-    過去の記憶をキーワード・タグ・日付・感情値で検索する。
-    全パラメータ省略時は最新20件を返却。
+    @server.tool()
+    async def recall(
+        query: list[str] | None = None,
+        tags: list[str] | None = None,
+        speaker: str | None = None,
+        project: str | None = None,
+        topic_id: list[int] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        emotion_filter: dict | None = None,
+        mode: str = "default",
+        compact: bool = False,
+        since: str | None = None,
+        tags_empty: bool = False,
+        topics_empty: bool = False,
+        source: str | None = None,
+        roles: list[str] | None = None,
+        min_occurrences: int | None = None,
+        exclude_tags: list[str] | None = None,
+        content_limit: int | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict:
+        """記憶を検索する。
 
-    Args:
-        query: 全文検索キーワード(AND検索)
-        tags: タグ名でフィルタ(AND検索)
-        speaker: 発言者でフィルタ
-        project: プロジェクト名でフィルタ
-        topic_id: トピックIDでフィルタ(OR検索)
-        date_from: 日付範囲の開始(YYYY-MM-DD)
-        date_to: 日付範囲の終了(YYYY-MM-DD)
-        emotion_filter: 感情値のレンジフィルタ(例: {"joy": {"min": 10}, "anger": {"max": 50}})
-        mode: 検索モード(default/hot/stats)
-        compact: コンパクトモード(フィールド削減、トークン節約)
-        since: 相対時間フィルタ(例: "7d", "24h", "2w")。date_fromと排他
-        tags_empty: タグなしメッセージのみ取得。tagsと排他
-        topics_empty: トピック未紐付けメッセージのみ取得。topic_idと排他
-        source: 発信元フィルタ(例: "claude-code")
-        roles: ロール名でフィルタ(AND検索)
-        min_occurrences: 最低出現回数(mode=stats時のみ有効、count >= min_occurrencesの行のみ返す)
-        exclude_tags: 除外するタグ名リスト(mode=stats時、該当タグを持つメッセージを集計から除外)
-        limit: 取得件数上限(デフォルト: 20)
-        offset: オフセット(デフォルト: 0)
-    """
-    return await recall_impl(
-        query=query,
-        tags=tags,
-        speaker=speaker,
-        project=project,
-        topic_id=topic_id,
-        date_from=date_from,
-        date_to=date_to,
-        emotion_filter=emotion_filter,
-        mode=mode,
-        compact=compact,
-        since=since,
-        tags_empty=tags_empty,
-        topics_empty=topics_empty,
-        source=source,
-        roles=roles,
-        min_occurrences=min_occurrences,
-        exclude_tags=exclude_tags,
-        limit=limit,
-        offset=offset,
-    )
+        過去の記憶をキーワード・タグ・日付・感情値で検索する。
+        全パラメータ省略時は最新20件を返却。
 
+        Args:
+            query: 全文検索キーワード(AND検索)
+            tags: タグ名でフィルタ(AND検索)
+            speaker: 発言者でフィルタ
+            project: プロジェクト名でフィルタ
+            topic_id: トピックIDでフィルタ(OR検索)
+            date_from: 日付範囲の開始(YYYY-MM-DD)
+            date_to: 日付範囲の終了(YYYY-MM-DD)
+            emotion_filter: 感情値のレンジフィルタ(例: {"joy": {"min": 10}, "anger": {"max": 50}})
+            mode: 検索モード(default/hot/stats)
+            compact: コンパクトモード(フィールド削減、トークン節約)
+            since: 相対時間フィルタ(例: "7d", "24h", "2w")。date_fromと排他
+            tags_empty: タグなしメッセージのみ取得。tagsと排他
+            topics_empty: トピック未紐付けメッセージのみ取得。topic_idと排他
+            source: 発信元フィルタ(例: "claude-code")
+            roles: ロール名でフィルタ(AND検索)
+            min_occurrences: 最低出現回数(mode=stats時のみ有効、count >= min_occurrencesの行のみ返す)
+            exclude_tags: 除外するタグ名リスト(mode=stats時、該当タグを持つメッセージを集計から除外)
+            content_limit: compact時に content を先頭N文字へ切り詰める(None=全文)
+            limit: 取得件数上限(デフォルト: 10)
+            offset: オフセット(デフォルト: 0)
+        """
+        return await recall_impl(
+            query=query,
+            tags=tags,
+            speaker=speaker,
+            project=project,
+            topic_id=topic_id,
+            date_from=date_from,
+            date_to=date_to,
+            emotion_filter=emotion_filter,
+            mode=mode,
+            compact=compact,
+            since=since,
+            tags_empty=tags_empty,
+            topics_empty=topics_empty,
+            source=source,
+            roles=roles,
+            min_occurrences=min_occurrences,
+            exclude_tags=exclude_tags,
+            content_limit=content_limit,
+            limit=limit,
+            offset=offset,
+        )
 
-@mcp.tool()
-async def edit(
-    message_id: int,
-    content: str | None = None,
-    emotion: dict | None = None,
-    reason: str | None = None,
-) -> dict:
-    """既存メッセージの content / emotion を部分修正する。
+    @server.tool()
+    async def edit(
+        message_id: int,
+        content: str | None = None,
+        emotion: dict | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        """既存メッセージの content / emotion を部分修正する。
 
-    直接UPDATEで、バージョン管理は行わない。
-    content と emotion の両方省略はエラー。
+        直接UPDATEで、バージョン管理は行わない。
+        content と emotion の両方省略はエラー。
 
-    Args:
-        message_id: 対象メッセージID
-        content: 新しい内容（指定時のみ更新）
-        emotion: 新しい感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}（指定キーのみ更新）
-        reason: 編集理由（記録用）
-    """
-    return await edit_impl(
-        message_id=message_id,
-        content=content,
-        emotion=emotion,
-        reason=reason,
-    )
+        Args:
+            message_id: 対象メッセージID
+            content: 新しい内容（指定時のみ更新）
+            emotion: 新しい感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}（指定キーのみ更新）
+            reason: 編集理由（記録用）
+        """
+        return await edit_impl(
+            message_id=message_id,
+            content=content,
+            emotion=emotion,
+            reason=reason,
+        )
 
+    @server.tool()
+    async def forget(
+        message_id: int,
+        reason: str | None = None,
+    ) -> dict:
+        """記憶を論理削除する。
 
-@mcp.tool()
-async def forget(
-    message_id: int,
-    reason: str | None = None,
-) -> dict:
-    """記憶を論理削除する。
+        指定した記憶を論理削除する。物理削除は行わない。
+        recall の検索結果からは除外される。
 
-    指定した記憶を論理削除する。物理削除は行わない。
-    recall の検索結果からは除外される。
+        Args:
+            message_id: 削除対象のメッセージID
+            reason: 削除理由
+        """
+        return await forget_impl(
+            message_id=message_id,
+            reason=reason,
+        )
 
-    Args:
-        message_id: 削除対象のメッセージID
-        reason: 削除理由
-    """
-    return await forget_impl(
-        message_id=message_id,
-        reason=reason,
-    )
+    @server.tool()
+    async def topic_manage(
+        action: str,
+        topic_id: int | None = None,
+        name: str | None = None,
+        emotion: dict | None = None,
+        message_ids: list[int] | None = None,
+        add_message_ids: list[int] | None = None,
+        remove_message_ids: list[int] | None = None,
+        status_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """トピック（議題）のCRUD操作を行う。
 
+        トピックの作成・クローズ・再開・更新・一覧取得を行う。
 
-@mcp.tool()
-async def topic_manage(
-    action: str,
-    topic_id: int | None = None,
-    name: str | None = None,
-    emotion: dict | None = None,
-    message_ids: list[int] | None = None,
-    add_message_ids: list[int] | None = None,
-    remove_message_ids: list[int] | None = None,
-    status_filter: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> dict:
-    """トピック（議題）のCRUD操作を行う。
+        Args:
+            action: "create" / "close" / "reopen" / "update" / "list"
+            topic_id: トピックID（close/reopen/update時必須）
+            name: トピック名（create時必須）
+            emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
+            message_ids: メッセージIDリスト（create時の初期紐付け）
+            add_message_ids: 追加するメッセージIDリスト（update時）
+            remove_message_ids: 削除するメッセージIDリスト（update時）
+            status_filter: ステータスフィルタ（list時: "open" / "closed"）
+            limit: 取得件数上限（list時、デフォルト: 50）
+            offset: オフセット（list時、デフォルト: 0）
+        """
+        return await topic_manage_impl(
+            action=action,
+            topic_id=topic_id,
+            name=name,
+            emotion=emotion,
+            message_ids=message_ids,
+            add_message_ids=add_message_ids,
+            remove_message_ids=remove_message_ids,
+            status_filter=status_filter,
+            limit=limit,
+            offset=offset,
+        )
 
-    トピックの作成・クローズ・再開・更新・一覧取得を行う。
+    @server.tool()
+    async def organize(
+        message_ids: list[int] | None = None,
+        query: list[str] | None = None,
+        tags: list[str] | None = None,
+        speaker: str | None = None,
+        project: str | None = None,
+        topic_id: list[int] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        emotion_filter: dict | None = None,
+        include_deleted: bool = False,
+        add_tags: list[str] | None = None,
+        remove_tags: list[str] | None = None,
+        limit: int = 100000,
+    ) -> dict:
+        """メッセージのタグ整理を行う。
 
-    Args:
-        action: "create" / "close" / "reopen" / "update" / "list"
-        topic_id: トピックID（close/reopen/update時必須）
-        name: トピック名（create時必須）
-        emotion: 感情値 {"joy": 0-255, "anger": 0-255, "sorrow": 0-255, "fun": 0-255}
-        message_ids: メッセージIDリスト（create時の初期紐付け）
-        add_message_ids: 追加するメッセージIDリスト（update時）
-        remove_message_ids: 削除するメッセージIDリスト（update時）
-        status_filter: ステータスフィルタ（list時: "open" / "closed"）
-        limit: 取得件数上限（list時、デフォルト: 50）
-        offset: オフセット（list時、デフォルト: 0）
-    """
-    return await topic_manage_impl(
-        action=action,
-        topic_id=topic_id,
-        name=name,
-        emotion=emotion,
-        message_ids=message_ids,
-        add_message_ids=add_message_ids,
-        remove_message_ids=remove_message_ids,
-        status_filter=status_filter,
-        limit=limit,
-        offset=offset,
-    )
+        検索条件またはID直接指定で対象メッセージを特定し、
+        タグの追加・削除を一括で行う。rememberからタグ付け責務を分離した専用コマンド。
 
+        Args:
+            message_ids: 対象メッセージIDの直接指定（検索条件との併用可）
+            query: 全文検索キーワード（AND検索）
+            tags: 既存タグでフィルタ（AND検索）
+            speaker: 発言者でフィルタ
+            project: プロジェクト名でフィルタ
+            topic_id: トピックIDでフィルタ（OR検索）
+            date_from: 日付範囲の開始（YYYY-MM-DD）
+            date_to: 日付範囲の終了（YYYY-MM-DD）
+            emotion_filter: 感情値のレンジフィルタ（例: {"joy": {"min": 10}, "anger": {"max": 50}}）
+            include_deleted: 論理削除済みも対象にする（デフォルト: false）
+            add_tags: 追加するタグ名の配列（未登録タグは自動作成）
+            remove_tags: 削除するタグ名の配列
+            limit: 処理件数上限（デフォルト: 100000）
+        """
+        return await organize_impl(
+            message_ids=message_ids,
+            query=query,
+            tags=tags,
+            speaker=speaker,
+            project=project,
+            topic_id=topic_id,
+            date_from=date_from,
+            date_to=date_to,
+            emotion_filter=emotion_filter,
+            include_deleted=include_deleted,
+            add_tags=add_tags,
+            remove_tags=remove_tags,
+            limit=limit,
+        )
 
-@mcp.tool()
-async def organize(
-    message_ids: list[int] | None = None,
-    query: list[str] | None = None,
-    tags: list[str] | None = None,
-    speaker: str | None = None,
-    project: str | None = None,
-    topic_id: list[int] | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    emotion_filter: dict | None = None,
-    include_deleted: bool = False,
-    add_tags: list[str] | None = None,
-    remove_tags: list[str] | None = None,
-    limit: int = 100000,
-) -> dict:
-    """メッセージのタグ整理を行う。
+    @server.tool()
+    async def rulebook(
+        action: str,
+        sub_action: str = "rule",
+        key: str | None = None,
+        content: str | None = None,
+        reason: str | None = None,
+        persona_id: str | None = None,
+        seq: int | None = None,
+        exportable: bool = False,
+    ) -> dict:
+        """ルールブック（what）とプロトコル（how）の参照・設定・廃止を行う。
 
-    検索条件またはID直接指定で対象メッセージを特定し、
-    タグの追加・削除を一括で行う。rememberからタグ付け責務を分離した専用コマンド。
+        sub_action="rule" は従来のルール管理（イミュータブル追記、バージョン管理）。
+        sub_action="protocol" は手順管理（UPSERT、ステップ単位）。
 
-    Args:
-        message_ids: 対象メッセージIDの直接指定（検索条件との併用可）
-        query: 全文検索キーワード（AND検索）
-        tags: 既存タグでフィルタ（AND検索）
-        speaker: 発言者でフィルタ
-        project: プロジェクト名でフィルタ
-        topic_id: トピックIDでフィルタ（OR検索）
-        date_from: 日付範囲の開始（YYYY-MM-DD）
-        date_to: 日付範囲の終了（YYYY-MM-DD）
-        emotion_filter: 感情値のレンジフィルタ（例: {"joy": {"min": 10}, "anger": {"max": 50}}）
-        include_deleted: 論理削除済みも対象にする（デフォルト: false）
-        add_tags: 追加するタグ名の配列（未登録タグは自動作成）
-        remove_tags: 削除するタグ名の配列
-        limit: 処理件数上限（デフォルト: 100000）
-    """
-    return await organize_impl(
-        message_ids=message_ids,
-        query=query,
-        tags=tags,
-        speaker=speaker,
-        project=project,
-        topic_id=topic_id,
-        date_from=date_from,
-        date_to=date_to,
-        emotion_filter=emotion_filter,
-        include_deleted=include_deleted,
-        add_tags=add_tags,
-        remove_tags=remove_tags,
-        limit=limit,
-    )
-
-
-@mcp.tool()
-async def rulebook(
-    action: str,
-    sub_action: str = "rule",
-    key: str | None = None,
-    content: str | None = None,
-    reason: str | None = None,
-    persona_id: str | None = None,
-    seq: int | None = None,
-    exportable: bool = False,
-) -> dict:
-    """ルールブック（what）とプロトコル（how）の参照・設定・廃止を行う。
-
-    sub_action="rule" は従来のルール管理（イミュータブル追記、バージョン管理）。
-    sub_action="protocol" は手順管理（UPSERT、ステップ単位）。
-
-    Args:
-        action: "get" / "set" / "retire" / "list"
-        sub_action: "rule"（デフォルト）/ "protocol"
-        key: rule のルールキー / protocol の手順名（get/set/retire時必須）
-        content: rule のルール本文 / protocol のステップ内容（set時必須、Markdown）
-        reason: 変更理由（rule のみ）
-        persona_id: ペルソナID（rule のみ。省略時は全ペルソナ共通 '*'）
-        seq: ステップ番号（protocol の set 時必須）
-        exportable: .claude/rules/ エクスポート対象フラグ（protocol の set 時）
-    """
-    return await rulebook_impl(
-        action=action,
-        sub_action=sub_action,
-        key=key,
-        content=content,
-        reason=reason,
-        persona_id=persona_id,
-        seq=seq,
-        exportable=exportable,
-    )
+        Args:
+            action: "get" / "set" / "retire" / "list"
+            sub_action: "rule"（デフォルト）/ "protocol"
+            key: rule のルールキー / protocol の手順名（get/set/retire時必須）
+            content: rule のルール本文 / protocol のステップ内容（set時必須、Markdown）
+            reason: 変更理由（rule のみ）
+            persona_id: ペルソナID（rule のみ。省略時は全ペルソナ共通 '*'）
+            seq: ステップ番号（protocol の set 時必須）
+            exportable: .claude/rules/ エクスポート対象フラグ（protocol の set 時）
+        """
+        return await rulebook_impl(
+            action=action,
+            sub_action=sub_action,
+            key=key,
+            content=content,
+            reason=reason,
+            persona_id=persona_id,
+            seq=seq,
+            exportable=exportable,
+        )
 
 
 def _registerPinRoute(server: FastMCP) -> None:
@@ -428,23 +428,6 @@ def _registerPinRoute(server: FastMCP) -> None:
         return await handlePinPost(request)
 
 
-def _reregisterTools(server: FastMCP) -> None:
-    """モジュールレベルで登録済みのツールを新しいサーバーインスタンスに移植する。
-
-    mcp変数を差し替えた際、旧インスタンスに登録されたツール定義を
-    新インスタンスにコピーする。
-
-    Note:
-        FastMCPの内部API（_tool_manager._tools）に依存している。
-        FastMCPのバージョンアップ時に構造変更の可能性があるため要確認。
-
-    Args:
-        server: ツールを移植する先のFastMCPインスタンス
-    """
-    for name, tool in mcp._tool_manager._tools.items():
-        server._tool_manager._tools[name] = tool
-
-
 def main():
     """MCPサーバーを起動する。
 
@@ -452,8 +435,6 @@ def main():
     --http: Streamable HTTPモード（リモートDesktop App用）
     --port: HTTPモード時のポート指定（デフォルト: 8765）
     """
-    global mcp
-
     parser = argparse.ArgumentParser(description="lisanima MCPサーバー")
     parser.add_argument(
         "--http",
@@ -468,13 +449,11 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.http:
-        # OAuth付きインスタンスに差し替え、ツール定義を移植する
-        http_mcp = _createMcp(http_mode=True)
-        _reregisterTools(http_mcp)
-        _registerPinRoute(http_mcp)
-        mcp = http_mcp
+    mcp = _buildMcp(http_mode=args.http)
+    _registerTools(mcp)
 
+    if args.http:
+        _registerPinRoute(mcp)
         mcp.settings.host = "127.0.0.1"
         mcp.settings.port = args.port
         logger.info("Streamable HTTPモードで起動 (port=%d)", args.port)

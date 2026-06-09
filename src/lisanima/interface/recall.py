@@ -3,6 +3,7 @@ import logging
 from datetime import date, datetime, timedelta
 
 from lisanima.db import db_pool
+from lisanima.interface._error_handlers import handleInterfaceErrors
 from lisanima.repositories import message_repo, stats_repo
 from lisanima.repositories._validators import (
     VALID_MODES,
@@ -118,6 +119,7 @@ def _applyCompact(
     return result
 
 
+@handleInterfaceErrors("recall")
 async def recall(
     query: list[str] | None = None,
     tags: list[str] | None = None,
@@ -178,94 +180,86 @@ async def recall(
     except ValueError as e:
         return {"error": "INVALID_PARAMETER", "message": str(e)}
 
-    try:
-        async with db_pool.get_connection() as conn:
-            # stats モード: 統計情報を返却して早期リターン
-            if mode == "stats":
-                # since / since_delta から datetime を算出
-                since_dt: datetime | None = None
-                if since_delta:
-                    since_dt = datetime.now().astimezone() - since_delta
+    async with db_pool.get_connection() as conn:
+        # stats モード: 統計情報を返却して早期リターン
+        if mode == "stats":
+            # since / since_delta から datetime を算出
+            since_dt: datetime | None = None
+            if since_delta:
+                since_dt = datetime.now().astimezone() - since_delta
 
-                # exclude_tagsが空リストの場合はNoneとして扱う（フィルタなし）
-                effective_exclude = exclude_tags if exclude_tags else None
+            # exclude_tagsが空リストの場合はNoneとして扱う（フィルタなし）
+            effective_exclude = exclude_tags if exclude_tags else None
 
-                summary = await stats_repo.getMessageStats(
-                    conn, since=since_dt, exclude_tags=effective_exclude,
-                )
-                tag_stats = await stats_repo.getTagStats(
-                    conn, since=since_dt,
-                    min_occurrences=min_occurrences,
-                    exclude_tags=effective_exclude,
-                )
-                topic_stats = await stats_repo.getTopicStats(
-                    conn, since=since_dt,
-                    min_occurrences=min_occurrences,
-                    exclude_tags=effective_exclude,
-                )
-                role_stats = await stats_repo.getRoleStats(
-                    conn, since=since_dt,
-                    min_occurrences=min_occurrences,
-                    exclude_tags=effective_exclude,
-                )
-
-                logger.debug("recall stats完了: since=%s", since_dt)
-                return {
-                    "mode": "stats",
-                    "summary": summary,
-                    "tags": tag_stats,
-                    "topics": topic_stats,
-                    "roles": role_stats,
-                }
-
-            # hot モード: 複合スコアリングで上位N件を自動浮上
-            if mode == "hot":
-                result = await stats_repo.getHotMessages(conn, limit=limit)
-                # datetimeをISO文字列に変換
-                for msg in result["messages"]:
-                    if msg.get("created_at"):
-                        msg["created_at"] = msg["created_at"].isoformat()
-                result["mode"] = "hot"
-                logger.debug("recall hot完了: total=%d", result["total"])
-                return result
-
-            result = await message_repo.searchMessages(
-                conn,
-                query=query,
-                tags=tags,
-                speaker=speaker,
-                project=project,
-                topic_id=topic_id,
-                date_from=date_from,
-                date_to=date_to,
-                emotion_filter=emotion_filter,
-                since_delta=since_delta,
-                tags_empty=tags_empty,
-                topics_empty=topics_empty,
-                source=source,
-                roles=roles,
-                limit=limit,
-                offset=offset,
+            summary = await stats_repo.getMessageStats(
+                conn, since=since_dt, exclude_tags=effective_exclude,
+            )
+            tag_stats = await stats_repo.getTagStats(
+                conn, since=since_dt,
+                min_occurrences=min_occurrences,
+                exclude_tags=effective_exclude,
+            )
+            topic_stats = await stats_repo.getTopicStats(
+                conn, since=since_dt,
+                min_occurrences=min_occurrences,
+                exclude_tags=effective_exclude,
+            )
+            role_stats = await stats_repo.getRoleStats(
+                conn, since=since_dt,
+                min_occurrences=min_occurrences,
+                exclude_tags=effective_exclude,
             )
 
-        # datetimeをISO文字列に変換
-        for msg in result["messages"]:
-            if msg.get("created_at"):
-                msg["created_at"] = msg["created_at"].isoformat()
-            if msg.get("session_date"):
-                msg["session_date"] = str(msg["session_date"])
+            logger.debug("recall stats完了: since=%s", since_dt)
+            return {
+                "mode": "stats",
+                "summary": summary,
+                "tags": tag_stats,
+                "topics": topic_stats,
+                "roles": role_stats,
+            }
 
-        # compact モード適用
-        if compact:
-            result["messages"] = _applyCompact(result["messages"], content_limit=content_limit)
+        # hot モード: 複合スコアリングで上位N件を自動浮上
+        if mode == "hot":
+            result = await stats_repo.getHotMessages(conn, limit=limit)
+            # datetimeをISO文字列に変換
+            for msg in result["messages"]:
+                if msg.get("created_at"):
+                    msg["created_at"] = msg["created_at"].isoformat()
+            result["mode"] = "hot"
+            logger.debug("recall hot完了: total=%d", result["total"])
+            return result
 
-        result["mode"] = mode
-        logger.debug("recall完了: total=%d, mode=%s, compact=%s", result["total"], mode, compact)
-        return result
+        result = await message_repo.searchMessages(
+            conn,
+            query=query,
+            tags=tags,
+            speaker=speaker,
+            project=project,
+            topic_id=topic_id,
+            date_from=date_from,
+            date_to=date_to,
+            emotion_filter=emotion_filter,
+            since_delta=since_delta,
+            tags_empty=tags_empty,
+            topics_empty=topics_empty,
+            source=source,
+            roles=roles,
+            limit=limit,
+            offset=offset,
+        )
 
-    except RuntimeError as e:
-        logger.error("DB接続エラー: %s", e)
-        return {"error": "DB_CONNECTION_ERROR", "message": str(e)}
-    except Exception as e:
-        logger.error("recall failed", exc_info=True)
-        return {"error": "INTERNAL_ERROR", "message": "予期しないエラーが発生しました"}
+    # datetimeをISO文字列に変換
+    for msg in result["messages"]:
+        if msg.get("created_at"):
+            msg["created_at"] = msg["created_at"].isoformat()
+        if msg.get("session_date"):
+            msg["session_date"] = str(msg["session_date"])
+
+    # compact モード適用
+    if compact:
+        result["messages"] = _applyCompact(result["messages"], content_limit=content_limit)
+
+    result["mode"] = mode
+    logger.debug("recall完了: total=%d, mode=%s, compact=%s", result["total"], mode, compact)
+    return result
