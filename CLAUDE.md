@@ -45,12 +45,10 @@
 
 ### ツール
 #### SQL実行
-utils/sql_executor.py を使う。使い方は下記の通り<br>
+`psql service=lisanima` を使う（接続情報は `~/.pg_service.conf` / `~/.pgpass`、なとせが管理）
 
-##### SQLファイルを読み込んで実行
-> python utils/sql_executor.py file sql/ins_tbl_m_rulebooks.sql
-
-
-##### 任意SQL実行
-> python utils/sql_executor.py exec "SELECT * FROM m_rulebooks WHERE level = 5;"
+```bash
+psql service=lisanima -f sql/ins_tbl_m_rulebooks.sql          # SQL ファイルを実行
+psql service=lisanima -c "SELECT * FROM m_rulebooks WHERE level = 5;"   # 任意 SQL
+```
 
